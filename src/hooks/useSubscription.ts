@@ -74,6 +74,7 @@ export function useSubscription(userId?: string) {
   }
 
   const loadOfferings = useCallback(async () => {
+    if (!PurchasesLoaded) return
     try {
       const offerings = await Purchases.getOfferings()
       if (offerings.current?.availablePackages) {
@@ -85,6 +86,7 @@ export function useSubscription(userId?: string) {
   }, [])
 
   const purchase = useCallback(async (pkg: any) => {
+    if (!PurchasesLoaded) return false
     try {
       const { customerInfo } = await Purchases.purchasePackage(pkg)
       const entitlement = customerInfo.entitlements.active[ENTITLEMENT_ID]
@@ -99,6 +101,7 @@ export function useSubscription(userId?: string) {
   }, [])
 
   const restore = useCallback(async () => {
+    if (!PurchasesLoaded) return false
     try {
       const customerInfo = await Purchases.restorePurchases()
       const entitlement = customerInfo.entitlements.active[ENTITLEMENT_ID]
