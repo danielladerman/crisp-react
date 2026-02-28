@@ -1,9 +1,9 @@
 // src/hooks/useSessionSideEffects.ts
 import { useEffect, useRef, useCallback, type Dispatch } from 'react'
 import type { SessionState, SessionAction, Message } from '../types/session'
-import { createSession, updateSession } from '../lib/storage'
-import { streamClaude } from '../lib/claude'
-import { COACHING_SYSTEM_PROMPT, DEEP_DIVE_SYSTEM_PROMPT } from '../lib/prompts'
+import { createSession, updateSession, getVoiceModel, upsertVoiceModel } from '../lib/storage'
+import { streamClaude, callClaude } from '../lib/claude'
+import { COACHING_SYSTEM_PROMPT, DEEP_DIVE_SYSTEM_PROMPT, VOICE_MODEL_UPDATE_PROMPT } from '../lib/prompts'
 import { detectWeaknessFromFeedback } from '../lib/frameworks'
 import { saveCheckpoint, clearCheckpoint, SESSION_KEY } from '../lib/sessionCheckpoint'
 import parseFeedback from '../lib/parseFeedback'
@@ -146,15 +146,35 @@ export function useSessionSideEffects(
     await updateSession(state.session.id, { markExplanation: text })
   }, [state.session])
 
-  // --- Save quality and mark complete ---
-  const saveQuality = useCallback(async (signal: string) => {
+  // --- Save quality, mark complete, and update voice model ---
+  const saveQuality = useCallback(async (signal: string, sessionNumber: number) => {
     if (!state.session) return
     await updateSession(state.session.id, {
       qualitySignal: signal,
       completed: true, // NOW we set completed (fixes B8)
     })
     clearCheckpoint(SESSION_KEY)
-  }, [state.session])
+
+    // Voice model update (every session for first 20, then every 3rd)
+    const shouldUpdate = sessionNumber <= 20 || sessionNumber % 3 === 0
+    if (shouldUpdate && state.session.user_id) {
+      try {
+        const currentModel = await getVoiceModel(state.session.user_id) || {}
+        const parts = parseFeedback(state.feedback)
+        const result = await callClaude({
+          model: 'claude-sonnet-4-6',
+          maxTokens: 3000,
+          systemPrompt: VOICE_MODEL_UPDATE_PROMPT,
+          messages: [{
+            role: 'user',
+            content: `CURRENT VOICE MODEL:\n${JSON.stringify(currentModel, null, 2)}\n\nSESSION DATA:\nMode: ${state.sessionMode}\nSession Number: ${sessionNumber}\nPrompt Type: ${state.prompt?.promptType}\nPrompt: ${state.prompt?.promptText}\nUser Response: ${state.responseText}\nAI Echo: ${parts.echo}\nAI Name: ${parts.name}\nDrill Prompt: ${parts.drill || 'none'}\nDrill Response: ${state.drillResponse || 'skipped'}\nAI Open: ${parts.open}\nQuality Signal: ${signal}\n\nUpdate the voice model. Return only updated JSON.`,
+          }],
+        })
+        const updatedModel = JSON.parse(result)
+        await upsertVoiceModel(state.session.user_id, updatedModel, sessionNumber)
+      } catch {}
+    }
+  }, [state])
 
   // --- Retry logic (fixes B6) ---
   useEffect(() => {
