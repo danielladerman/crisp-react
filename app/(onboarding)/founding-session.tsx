@@ -67,7 +67,9 @@ export default function FoundingSessionScreen() {
   const handleQualityAndClose = useCallback(async (signal: string) => {
     await submitQuality(signal)
 
-    try { await updateStreak(user?.id) } catch {}
+    try { await updateStreak(user?.id) } catch (err) {
+      if (__DEV__) console.error('updateStreak:', err)
+    }
 
     // Voice model update with intake seeding
     try {
@@ -85,7 +87,9 @@ export default function FoundingSessionScreen() {
       })
       const updatedModel = JSON.parse(result)
       await upsertVoiceModel(user?.id, updatedModel, 1)
-    } catch {}
+    } catch (err) {
+      if (__DEV__) console.error('Voice model update:', err)
+    }
 
     // Route to paywall after founding session
     router.replace('/(onboarding)/paywall')

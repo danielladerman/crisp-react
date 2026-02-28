@@ -11,7 +11,9 @@ export default function WelcomeScreen() {
 
   async function handleContinue() {
     if (name.trim()) {
-      try { await saveName(name.trim()) } catch {}
+      try { await saveName(name.trim()) } catch (err) {
+        if (__DEV__) console.error('saveName:', err)
+      }
     }
     router.push('/(onboarding)/philosophy')
   }

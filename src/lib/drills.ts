@@ -12,8 +12,8 @@ export const CATEGORIES = [
 
 export const DIFFICULTY_GATES = {
   foundational: 1,
-  intermediate: 1,  // TODO: restore to 15 for production
-  advanced: 1,      // TODO: restore to 30 for production
+  intermediate: __DEV__ ? 1 : 15,
+  advanced: __DEV__ ? 1 : 30,
 }
 
 export const DRILLS = [

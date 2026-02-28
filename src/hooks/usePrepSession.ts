@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { createPrepSession, updatePrepSession, upsertVoiceModel } from '../lib/storage'
 import { streamClaude, callClaude } from '../lib/claude'
 import { PREP_COACHING_SYSTEM_PROMPT, KEY_MESSAGES_SYSTEM_PROMPT, VOICE_MODEL_UPDATE_PROMPT } from '../lib/prompts'
@@ -14,14 +14,16 @@ export function usePrepSession({ userId, sessionCount = 0 }) {
   const [streaming, setStreaming] = useState(false)
   const [currentResponse, setCurrentResponse] = useState('')
   const [error, setError] = useState(null)
+  const voiceModelRef = useRef(null)
 
   const startPrep = useCallback(async (situationType, situationDescription) => {
     try {
       const session = await createPrepSession({ userId, situationType, situationDescription })
       setPrepSession(session)
 
-      // Get voice model for calibration
+      // Get voice model for calibration (cache in ref for submitMessage)
       const voiceModel = await getVoiceModel(userId)
+      voiceModelRef.current = voiceModel
 
       const systemPrompt = `${PREP_COACHING_SYSTEM_PROMPT}\n\nSITUATION TYPE: ${situationType}\nSITUATION: ${situationDescription}${voiceModel ? `\n\nVOICE MODEL:\n${JSON.stringify(voiceModel, null, 2)}` : ''}`
 
@@ -77,7 +79,7 @@ export function usePrepSession({ userId, sessionCount = 0 }) {
     const newExchanges = [...exchanges, { role: 'user', content: text }]
     setExchanges(newExchanges)
 
-    const voiceModel = await getVoiceModel(userId)
+    const voiceModel = voiceModelRef.current
     const systemPrompt = `${PREP_COACHING_SYSTEM_PROMPT}${voiceModel ? `\n\nVOICE MODEL:\n${JSON.stringify(voiceModel, null, 2)}` : ''}`
 
     await streamClaude({

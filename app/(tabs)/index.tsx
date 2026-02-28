@@ -47,7 +47,9 @@ export default function HomeScreen() {
         }
         const cp = await loadCheckpoint(SESSION_KEY)
         setCheckpoint(cp)
-      } catch {}
+      } catch (err) {
+        if (__DEV__) console.error('Home data load:', err)
+      }
       setPageLoading(false)
     }
     load()

@@ -21,7 +21,9 @@ export default function IntakeScreen() {
     setAnswers(updated)
 
     if (currentQ === totalQuestions - 1) {
-      try { await saveIntakeAnswers(updated) } catch {}
+      try { await saveIntakeAnswers(updated) } catch (err) {
+        if (__DEV__) console.error('saveIntakeAnswers:', err)
+      }
       router.push({ pathname: '/(onboarding)/starter-path', params: { answers: JSON.stringify(updated) } })
       return
     }
