@@ -172,7 +172,9 @@ export function useSessionSideEffects(
         })
         const updatedModel = JSON.parse(result)
         await upsertVoiceModel(state.session.user_id, updatedModel, sessionNumber)
-      } catch {}
+      } catch (err) {
+        if (__DEV__) console.error('Voice model update failed:', err)
+      }
     }
   }, [state])
 

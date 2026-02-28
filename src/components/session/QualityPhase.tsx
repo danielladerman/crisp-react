@@ -24,7 +24,9 @@ export function QualityPhase({ state, dispatch, sideEffects, recordPractice, ses
   const handleSelect = useCallback(async (signal: string) => {
     dispatch({ type: 'SUBMIT_QUALITY', signal })
     await sideEffects.saveQuality(signal, sessionNumber)
-    try { await recordPractice() } catch {}
+    try { await recordPractice() } catch (err) {
+      if (__DEV__) console.error('recordPractice failed:', err)
+    }
   }, [dispatch, sideEffects, recordPractice, sessionNumber])
 
   return (
