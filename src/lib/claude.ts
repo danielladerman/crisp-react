@@ -46,7 +46,10 @@ export async function streamClaude({ systemPrompt, messages, onChunk, onDone, on
       throw new Error(error.error?.message || `API error: ${response.status}`)
     }
 
-    const reader = response.body!.getReader()
+    if (!response.body) {
+      throw new Error('No response body — streaming not supported in this environment')
+    }
+    const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let fullText = ''
     let buffer = ''

@@ -31,7 +31,9 @@ export default function RootLayout() {
     hasNavigated.current = true
 
     // Check if user needs onboarding or paywall
+    let cancelled = false
     getSessionCount(user.id).then((count) => {
+      if (cancelled) return
       if (count === 0) {
         router.replace('/(onboarding)/welcome')
       } else if (!isSubscribed) {
@@ -40,7 +42,8 @@ export default function RootLayout() {
         router.replace('/(tabs)')
       }
     })
-  }, [user, loading, subLoading, isSubscribed])
+    return () => { cancelled = true }
+  }, [user, loading, subLoading, isSubscribed, segments])
 
   return (
     <>
