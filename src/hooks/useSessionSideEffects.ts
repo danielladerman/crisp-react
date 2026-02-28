@@ -1,5 +1,5 @@
 // src/hooks/useSessionSideEffects.ts
-import { useEffect, useRef, useCallback, Dispatch } from 'react'
+import { useEffect, useRef, useCallback, type Dispatch } from 'react'
 import type { SessionState, SessionAction, Message } from '../types/session'
 import { createSession, updateSession } from '../lib/storage'
 import { streamClaude } from '../lib/claude'
@@ -112,15 +112,10 @@ export function useSessionSideEffects(
         },
       })
     } catch (err) {
-      // streamClaude throws after calling onError, so only dispatch if this
-      // is not a re-throw from the stream (onError already handled it).
-      // We guard by checking if the phase is still 'thinking' (meaning
-      // onError didn't fire yet, e.g. a pre-stream failure).
-      if (state.phase === 'thinking') {
-        dispatch({ type: 'FEEDBACK_ERROR', error: err instanceof Error ? err.message : 'Unknown error' })
-      }
+      // Always dispatch — the reducer handles FEEDBACK_ERROR idempotently
+      dispatch({ type: 'FEEDBACK_ERROR', error: err instanceof Error ? err.message : 'Unknown error' })
     }
-  }, [state.session, state.conversationHistory, state.prompt, state.phase, config, dispatch])
+  }, [state.session, state.conversationHistory, state.prompt, config, dispatch])
 
   // --- Save mark to DB ---
   const saveMark = useCallback(async (markedText: string) => {
@@ -169,6 +164,7 @@ export function useSessionSideEffects(
       submitResponse(state.lastResponseText, isDeepDive)
     }
     prevPhaseRef.current = state.phase
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally trigger only on phase transitions
   }, [state.phase])
 
   return {

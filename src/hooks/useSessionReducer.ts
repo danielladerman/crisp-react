@@ -150,7 +150,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case 'RESTORE_CHECKPOINT':
       return {
         ...state,
-        phase: action.checkpoint.phase as SessionPhase,
+        phase: action.checkpoint.phase,
         feedback: action.checkpoint.feedback || '',
         conversationHistory: action.checkpoint.conversationHistory || [],
         drillText: action.checkpoint.drillText || null,
@@ -163,6 +163,8 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         },
         responseText: action.checkpoint.responseText || '',
         lastResponseText: action.checkpoint.responseText || '',
+        markedMoment: action.checkpoint.markedText || '',
+        markExplanation: action.checkpoint.markExplanation || '',
       }
 
     case 'SET_ERROR':
