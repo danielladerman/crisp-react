@@ -2,6 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { validateVoiceModel } from './voiceModelValidation'
 
+function localDateString(): string {
+  return new Intl.DateTimeFormat('en-CA').format(new Date())
+}
+
 // Sessions
 export async function createSession({ userId, promptType, promptText, responseMode = 'text', sessionMode = 'daily', sessionNumber = null }) {
   const { data, error } = await supabase
@@ -251,7 +255,7 @@ export async function getStreak(userId) {
 
 export async function updateStreak(userId) {
   const streak = await getStreak(userId)
-  const today = new Date().toISOString().split('T')[0]
+  const today = localDateString()
 
   if (streak.last_practiced_date === today) {
     return streak
@@ -259,7 +263,7 @@ export async function updateStreak(userId) {
 
   const yesterday = new Date()
   yesterday.setDate(yesterday.getDate() - 1)
-  const yesterdayStr = yesterday.toISOString().split('T')[0]
+  const yesterdayStr = new Intl.DateTimeFormat('en-CA').format(yesterday)
 
   let newStreak = streak.current_streak
   if (streak.last_practiced_date === yesterdayStr) {
@@ -432,7 +436,7 @@ export async function saveIntakeAnswers(answers) {
 const TODAY_WORKOUT_KEY = 'crisp_today_workout'
 
 export async function saveTodayWorkout(drillName: string) {
-  const date = new Date().toISOString().split('T')[0]
+  const date = localDateString()
   await AsyncStorage.setItem(TODAY_WORKOUT_KEY, JSON.stringify({ drillName, date }))
 }
 
@@ -441,7 +445,7 @@ export async function loadTodayWorkout() {
     const raw = await AsyncStorage.getItem(TODAY_WORKOUT_KEY)
     if (!raw) return null
     const { drillName, date } = JSON.parse(raw)
-    const today = new Date().toISOString().split('T')[0]
+    const today = localDateString()
     return date === today ? { drill_name: drillName } : null
   } catch {
     return null
