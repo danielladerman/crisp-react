@@ -14,7 +14,7 @@ const MARKERS = ['ECHO', 'NAME', 'DRILL', 'OPEN']
  * Attempt to parse text using section markers like [ECHO], [NAME], etc.
  * Returns null if no markers are found so the caller can fall back.
  */
-function parseWithMarkers(text) {
+function parseWithMarkers(text: string) {
   // Check whether any markers are present at all
   const hasAnyMarker = MARKERS.some(m => text.includes(`[${m}]`))
   if (!hasAnyMarker) return null
@@ -42,7 +42,7 @@ function parseWithMarkers(text) {
  * Paragraph-based fallback matching the original parseFeedback logic from
  * useSession.js. Splits on double-newlines and maps paragraphs to fields.
  */
-function parseWithParagraphs(text) {
+function parseWithParagraphs(text: string) {
   const paragraphs = text.split(/\n\n+/).filter(p => p.trim())
 
   if (paragraphs.length >= 3) {
@@ -77,7 +77,7 @@ function parseWithParagraphs(text) {
  * @param {string} text - Raw feedback text from the AI
  * @returns {{ echo: string, name: string, drill: string|null, open: string }}
  */
-export default function parseFeedback(text) {
+export default function parseFeedback(text: string) {
   if (!text) {
     return { echo: '', name: '', drill: null, open: '' }
   }

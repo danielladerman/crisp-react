@@ -7,7 +7,7 @@ function localDateString(): string {
 }
 
 // Sessions
-export async function createSession({ userId, promptType, promptText, responseMode = 'text', sessionMode = 'daily', sessionNumber = null }) {
+export async function createSession({ userId, promptType, promptText, responseMode = 'text', sessionMode = 'daily', sessionNumber = null }: { userId: string; promptType: string; promptText: string; responseMode?: string; sessionMode?: string; sessionNumber?: number | null }) {
   const { data, error } = await supabase
     .from('sessions')
     .insert({
@@ -26,8 +26,8 @@ export async function createSession({ userId, promptType, promptText, responseMo
   return data
 }
 
-export async function updateSession(sessionId, updates) {
-  const columnMap = {
+export async function updateSession(sessionId: string, updates: Record<string, unknown>) {
+  const columnMap: Record<string, string> = {
     responseText: 'response_text',
     feedbackEcho: 'feedback_echo',
     feedbackName: 'feedback_name',
@@ -47,7 +47,7 @@ export async function updateSession(sessionId, updates) {
     secondaryCapture: 'secondary_capture',
   }
 
-  const mapped = {}
+  const mapped: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(updates)) {
     const col = columnMap[key] || key
     mapped[col] = value
@@ -61,7 +61,7 @@ export async function updateSession(sessionId, updates) {
   if (error) throw error
 }
 
-export async function getRecentSessions(userId, limit = 10) {
+export async function getRecentSessions(userId: string, limit = 10) {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
@@ -73,7 +73,7 @@ export async function getRecentSessions(userId, limit = 10) {
   return data
 }
 
-export async function getTodaySession(userId) {
+export async function getTodaySession(userId: string) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
@@ -89,7 +89,7 @@ export async function getTodaySession(userId) {
   return data?.[0] || null
 }
 
-export async function getIncompleteSession(userId) {
+export async function getIncompleteSession(userId: string) {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
@@ -102,7 +102,7 @@ export async function getIncompleteSession(userId) {
   return data?.[0] || null
 }
 
-export async function getSessionCount(userId) {
+export async function getSessionCount(userId: string) {
   const { count, error } = await supabase
     .from('sessions')
     .select('*', { count: 'exact', head: true })
@@ -114,7 +114,7 @@ export async function getSessionCount(userId) {
 }
 
 // Voice Model
-export async function getVoiceModel(userId) {
+export async function getVoiceModel(userId: string) {
   const { data, error } = await supabase
     .from('voice_models')
     .select('*')
@@ -125,7 +125,7 @@ export async function getVoiceModel(userId) {
   return data?.model || null
 }
 
-export async function upsertVoiceModel(userId, model, sessionCount) {
+export async function upsertVoiceModel(userId: string, model: Record<string, unknown>, sessionCount: number) {
   const { valid, errors } = validateVoiceModel(model)
   if (!valid) {
     console.error('Voice model validation failed, keeping existing model:', errors)
@@ -145,7 +145,7 @@ export async function upsertVoiceModel(userId, model, sessionCount) {
 }
 
 // Library
-export async function addToLibrary({ userId, sessionId, markedText, promptText, aiObservation, promptType, markExplanation = null, secondaryCapture = null, sessionNumber = null }) {
+export async function addToLibrary({ userId, sessionId, markedText, promptText, aiObservation, promptType, markExplanation = null, secondaryCapture = null, sessionNumber = null }: { userId: string; sessionId: string; markedText: string; promptText: string; aiObservation: string; promptType: string; markExplanation?: string | null; secondaryCapture?: string | null; sessionNumber?: number | null }) {
   const { data, error } = await supabase
     .from('library')
     .insert({
@@ -166,14 +166,14 @@ export async function addToLibrary({ userId, sessionId, markedText, promptText, 
   return data
 }
 
-export async function updateLibraryEntry(entryId, userId, updates) {
-  const columnMap = {
+export async function updateLibraryEntry(entryId: string, userId: string, updates: Record<string, unknown>) {
+  const columnMap: Record<string, string> = {
     markedText: 'marked_text',
     markExplanation: 'mark_explanation',
     secondaryCapture: 'secondary_capture',
   }
 
-  const mapped = { updated_at: new Date().toISOString() }
+  const mapped: Record<string, unknown> = { updated_at: new Date().toISOString() }
   for (const [key, value] of Object.entries(updates)) {
     const col = columnMap[key] || key
     mapped[col] = value
@@ -188,7 +188,7 @@ export async function updateLibraryEntry(entryId, userId, updates) {
   if (error) throw error
 }
 
-export async function deleteLibraryEntry(entryId, userId) {
+export async function deleteLibraryEntry(entryId: string, userId: string) {
   const { error } = await supabase
     .from('library')
     .delete()
@@ -198,7 +198,7 @@ export async function deleteLibraryEntry(entryId, userId) {
   if (error) throw error
 }
 
-export async function getLibrary(userId) {
+export async function getLibrary(userId: string) {
   const { data, error } = await supabase
     .from('library')
     .select('*')
@@ -209,7 +209,7 @@ export async function getLibrary(userId) {
   return data || []
 }
 
-export async function getLibraryFiltered(userId, filter = 'all') {
+export async function getLibraryFiltered(userId: string, filter = 'all') {
   if (filter === 'all') {
     return getLibrary(userId)
   }
@@ -242,7 +242,7 @@ export async function getLibraryFiltered(userId, filter = 'all') {
 }
 
 // Streaks
-export async function getStreak(userId) {
+export async function getStreak(userId: string) {
   const { data, error } = await supabase
     .from('streaks')
     .select('*')
@@ -253,7 +253,7 @@ export async function getStreak(userId) {
   return data || { current_streak: 0, longest_streak: 0, last_practiced_date: null, freeze_count: 2 }
 }
 
-export async function updateStreak(userId) {
+export async function updateStreak(userId: string) {
   const streak = await getStreak(userId)
   const today = localDateString()
 
@@ -302,7 +302,7 @@ export async function updateStreak(userId) {
 }
 
 // Weakness SRS
-export async function getWeaknessSRS(userId) {
+export async function getWeaknessSRS(userId: string) {
   const { data, error } = await supabase
     .from('weakness_srs')
     .select('*')
@@ -312,7 +312,7 @@ export async function getWeaknessSRS(userId) {
   return data || []
 }
 
-export async function upsertWeaknessSRS(userId, weaknessId, updates) {
+export async function upsertWeaknessSRS(userId: string, weaknessId: string, updates: Record<string, unknown>) {
   const { error } = await supabase
     .from('weakness_srs')
     .upsert({
@@ -324,7 +324,7 @@ export async function upsertWeaknessSRS(userId, weaknessId, updates) {
   if (error) throw error
 }
 
-export async function getActiveWeaknesses(userId) {
+export async function getActiveWeaknesses(userId: string) {
   const { data, error } = await supabase
     .from('weakness_srs')
     .select('*')
@@ -336,7 +336,7 @@ export async function getActiveWeaknesses(userId) {
 }
 
 // Prep Sessions
-export async function createPrepSession({ userId, situationType, situationDescription }) {
+export async function createPrepSession({ userId, situationType, situationDescription }: { userId: string; situationType: string; situationDescription: string }) {
   const { data, error } = await supabase
     .from('prep_sessions')
     .insert({
@@ -352,15 +352,15 @@ export async function createPrepSession({ userId, situationType, situationDescri
   return data
 }
 
-export async function updatePrepSession(prepId, updates) {
-  const columnMap = {
+export async function updatePrepSession(prepId: string, updates: Record<string, unknown>) {
+  const columnMap: Record<string, string> = {
     prepExchanges: 'prep_exchanges',
     keyMessages: 'key_messages',
     situationType: 'situation_type',
     situationDescription: 'situation_description',
   }
 
-  const mapped = {}
+  const mapped: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(updates)) {
     const col = columnMap[key] || key
     mapped[col] = value
@@ -374,7 +374,7 @@ export async function updatePrepSession(prepId, updates) {
   if (error) throw error
 }
 
-export async function getPrepSessions(userId, limit = 10) {
+export async function getPrepSessions(userId: string, limit = 10) {
   const { data, error } = await supabase
     .from('prep_sessions')
     .select('*')
@@ -386,7 +386,7 @@ export async function getPrepSessions(userId, limit = 10) {
   return data || []
 }
 
-export async function getPrepSession(prepId) {
+export async function getPrepSession(prepId: string) {
   const { data, error } = await supabase
     .from('prep_sessions')
     .select('*')
@@ -398,7 +398,7 @@ export async function getPrepSession(prepId) {
 }
 
 // Notification Log
-export async function logNotification({ userId, promptText }) {
+export async function logNotification({ userId, promptText }: { userId: string; promptText: string }) {
   const { error } = await supabase
     .from('notification_log')
     .insert({
@@ -409,7 +409,7 @@ export async function logNotification({ userId, promptText }) {
   if (error) throw error
 }
 
-export async function getRecentNotifications(userId, limit = 10) {
+export async function getRecentNotifications(userId: string, limit = 10) {
   const { data, error } = await supabase
     .from('notification_log')
     .select('*')
@@ -423,7 +423,7 @@ export async function getRecentNotifications(userId, limit = 10) {
 
 // ── Intake Answers ──────────────────────────────
 
-export async function saveIntakeAnswers(answers) {
+export async function saveIntakeAnswers(answers: Record<string, string>) {
   const { data: { user } } = await supabase.auth.getUser()
   const { error } = await supabase.auth.updateUser({
     data: { ...user?.user_metadata, intake_answers: answers },
@@ -452,7 +452,7 @@ export async function loadTodayWorkout() {
   }
 }
 
-export async function createWorkoutSession({ userId, drillId, drillName, category, difficulty, durationSeconds, notes = null }) {
+export async function createWorkoutSession({ userId, drillId, drillName, category, difficulty, durationSeconds, notes = null }: { userId: string; drillId: string; drillName: string; category: string; difficulty: string; durationSeconds: number; notes?: string | null }) {
   const { data, error } = await supabase
     .from('workout_sessions')
     .insert({
@@ -470,7 +470,7 @@ export async function createWorkoutSession({ userId, drillId, drillName, categor
   return data
 }
 
-export async function upsertWorkoutProgress(userId, drillId) {
+export async function upsertWorkoutProgress(userId: string, drillId: string) {
   const { data: existing } = await supabase
     .from('workout_progress')
     .select('*')
@@ -509,7 +509,7 @@ export async function upsertWorkoutProgress(userId, drillId) {
   }
 }
 
-export async function getAllWorkoutProgress(userId) {
+export async function getAllWorkoutProgress(userId: string) {
   const { data, error } = await supabase
     .from('workout_progress')
     .select('*')
@@ -518,7 +518,7 @@ export async function getAllWorkoutProgress(userId) {
   return data || []
 }
 
-export async function getWorkoutSessionCount(userId, category = null) {
+export async function getWorkoutSessionCount(userId: string, category: string | null = null) {
   let query = supabase
     .from('workout_sessions')
     .select('id', { count: 'exact', head: true })
@@ -531,14 +531,14 @@ export async function getWorkoutSessionCount(userId, category = null) {
   return count || 0
 }
 
-export async function getCategoryCompletions(userId) {
+export async function getCategoryCompletions(userId: string) {
   const { data, error } = await supabase
     .from('workout_sessions')
     .select('category')
     .eq('user_id', userId)
   if (error) throw error
-  const counts = {}
-  ;(data || []).forEach(row => {
+  const counts: Record<string, number> = {}
+  ;(data || []).forEach((row: { category: string }) => {
     counts[row.category] = (counts[row.category] || 0) + 1
   })
   return counts

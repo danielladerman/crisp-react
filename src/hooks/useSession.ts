@@ -71,7 +71,7 @@ export function useSession({ userId, sessionCount = 0, voiceModel = null, onWeak
       })
       return newSession
     } catch (err) {
-      setError((err as any).message)
+      setError((err instanceof Error ? err.message : 'Unknown error'))
       throw err
     }
   }, [userId])
@@ -135,12 +135,12 @@ export function useSession({ userId, sessionCount = 0, voiceModel = null, onWeak
         },
         onError: (err) => {
           setFeedbackStreaming(false)
-          setError((err as any).message)
+          setError((err instanceof Error ? err.message : 'Unknown error'))
           setPhase('feedback')
         },
       })
     } catch (err) {
-      setError((err as any).message)
+      setError((err instanceof Error ? err.message : 'Unknown error'))
       setPhase('feedback')
     }
   }, [session, sessionCount, voiceModel, conversationHistory, onWeaknessDetected, checkpoint])
@@ -184,12 +184,12 @@ export function useSession({ userId, sessionCount = 0, voiceModel = null, onWeak
         },
         onError: (err) => {
           setFeedbackStreaming(false)
-          setError((err as any).message)
+          setError((err instanceof Error ? err.message : 'Unknown error'))
           setPhase('feedback')
         },
       })
     } catch (err) {
-      setError((err as any).message)
+      setError((err instanceof Error ? err.message : 'Unknown error'))
       setPhase('feedback')
     }
   }, [session, sessionCount, conversationHistory, checkpoint])

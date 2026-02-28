@@ -63,11 +63,11 @@ export function usePrepSession({ userId, sessionCount = 0 }) {
         },
         onError: (err) => {
           setStreaming(false)
-          setError((err as any).message)
+          setError((err instanceof Error ? err.message : 'Unknown error'))
         },
       })
     } catch (err) {
-      setError((err as any).message)
+      setError((err instanceof Error ? err.message : 'Unknown error'))
     }
   }, [userId])
 
@@ -100,7 +100,7 @@ export function usePrepSession({ userId, sessionCount = 0 }) {
       },
       onError: (err) => {
         setStreaming(false)
-        setError((err as any).message)
+        setError((err instanceof Error ? err.message : 'Unknown error'))
       },
     })
   }, [prepSession, exchanges, userId])
@@ -142,7 +142,7 @@ export function usePrepSession({ userId, sessionCount = 0 }) {
         console.error('Voice model update failed (non-blocking):', err)
       }
     } catch (err) {
-      setError((err as any).message)
+      setError((err instanceof Error ? err.message : 'Unknown error'))
       setPhase('conversation')
     }
   }, [prepSession, exchanges, userId, sessionCount])

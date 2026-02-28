@@ -24,17 +24,17 @@ export const WEAKNESS_PATTERNS = [
   { id: 'performance-voice', name: 'Performance voice', description: 'Register shifts when performing intelligence' },
 ]
 
-export function getNextInterval(currentInterval, qualitySignal) {
-  const multipliers = {
+export function getNextInterval(currentInterval: number, qualitySignal: string) {
+  const multipliers: Record<string, number> = {
     breakthrough: 2.5,
     solid: 2.0,
     routine: 1.5,
     struggled: 0.5,
   }
-  return Math.round(currentInterval * multipliers[qualitySignal])
+  return Math.round(currentInterval * (multipliers[qualitySignal] ?? 1))
 }
 
-export function getFrameworksDue(srsState) {
+export function getFrameworksDue(srsState: Array<{ lastPracticed?: string | null; interval_days: number }>) {
   const now = new Date()
   return srsState
     .filter(f => {
@@ -50,7 +50,7 @@ export function getFrameworksDue(srsState) {
     })
 }
 
-export function getWeaknessDrillsDue(weaknessSrsState) {
+export function getWeaknessDrillsDue(weaknessSrsState: Array<{ status: string; last_drilled?: string | null; interval_days: number }>) {
   const now = new Date()
   return weaknessSrsState
     .filter(w => {
@@ -67,11 +67,11 @@ export function getWeaknessDrillsDue(weaknessSrsState) {
     })
 }
 
-export function shouldResolveWeakness(consecutiveClean, intervalDays) {
+export function shouldResolveWeakness(consecutiveClean: number, intervalDays: number) {
   return consecutiveClean >= 5 && intervalDays >= 14
 }
 
-export function detectWeaknessFromFeedback(nameText, drillText) {
+export function detectWeaknessFromFeedback(nameText: string | null, drillText: string | null) {
   if (!nameText) return null
   const text = (nameText + ' ' + (drillText || '')).toLowerCase()
   const patterns = {
