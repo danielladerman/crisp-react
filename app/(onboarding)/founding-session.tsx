@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -22,7 +22,7 @@ export default function FoundingSessionScreen() {
   const [responseText, setResponseText] = useState('')
   const [deepDiveText, setDeepDiveText] = useState('')
   const [openQuestion, setOpenQuestion] = useState('')
-  const [started, setStarted] = useState(false)
+  const startedRef = useRef(false)
 
   const foundingPrompt = useMemo(() => {
     if (intakeAnswers) {
@@ -42,10 +42,11 @@ export default function FoundingSessionScreen() {
     onWeaknessDetected: null,
   })
 
-  if (!started && user) {
+  useEffect(() => {
+    if (startedRef.current || !user) return
+    startedRef.current = true
     startSession({ promptType: foundingPrompt.promptType, promptText: foundingPrompt.promptText })
-    setStarted(true)
-  }
+  }, [user])
 
   const handleSubmit = useCallback(async () => {
     if (!responseText.trim()) return

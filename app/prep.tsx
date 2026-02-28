@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -16,9 +16,17 @@ export default function PrepScreen() {
   const [loaded, setLoaded] = useState(false)
 
   // Load session count once
-  if (!loaded && user?.id) {
-    getSessionCount(user.id).then((c) => { setSessionCount(c); setLoaded(true) })
-  }
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    getSessionCount(user.id).then((c) => {
+      if (!cancelled) {
+        setSessionCount(c)
+        setLoaded(true)
+      }
+    })
+    return () => { cancelled = true }
+  }, [user?.id])
 
   const {
     exchanges, keyMessages, phase, streaming, currentResponse, error,
