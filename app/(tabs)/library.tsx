@@ -24,6 +24,11 @@ const FILTERS: { key: FilterType; label: string }[] = [
   { key: 'prep', label: 'Prep' },
 ]
 
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 export default function LibraryScreen() {
   const { user } = useAuth()
   const [entries, setEntries] = useState<LibraryEntry[]>([])
@@ -63,17 +68,13 @@ export default function LibraryScreen() {
               setEntries(prev => prev.filter(e => e.id !== entryId))
             } catch (err) {
               if (__DEV__) console.error('Delete error:', err)
+              Alert.alert('Error', 'Could not delete this entry. Please try again.')
             }
           },
         },
       ],
     )
   }, [user?.id])
-
-  const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  }
 
   const renderEntry = ({ item }: { item: LibraryEntry }) => (
     <Card>
