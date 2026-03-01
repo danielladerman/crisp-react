@@ -22,10 +22,15 @@ const QUALITY_SIGNALS = [
 
 export function QualityPhase({ state, dispatch, sideEffects, recordPractice, sessionNumber }: Props) {
   const handleSelect = useCallback(async (signal: string) => {
-    dispatch({ type: 'SUBMIT_QUALITY', signal })
-    await sideEffects.saveQuality(signal, sessionNumber)
-    try { await recordPractice() } catch (err) {
-      if (__DEV__) console.error('recordPractice failed:', err)
+    try {
+      await sideEffects.saveQuality(signal, sessionNumber)
+      dispatch({ type: 'SUBMIT_QUALITY', signal })
+      try { await recordPractice() } catch (err) {
+        if (__DEV__) console.error('recordPractice failed:', err)
+      }
+    } catch (err) {
+      if (__DEV__) console.error('saveQuality failed:', err)
+      dispatch({ type: 'SET_ERROR', error: 'Failed to save session. Please try again.' })
     }
   }, [dispatch, sideEffects, recordPractice, sessionNumber])
 

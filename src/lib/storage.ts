@@ -26,6 +26,16 @@ export async function createSession({ userId, promptType, promptText, responseMo
   return data
 }
 
+export async function getSession(sessionId: string) {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select()
+    .eq('id', sessionId)
+    .single()
+  if (error) throw error
+  return data
+}
+
 export async function updateSession(sessionId: string, updates: Record<string, unknown>) {
   const columnMap: Record<string, string> = {
     responseText: 'response_text',

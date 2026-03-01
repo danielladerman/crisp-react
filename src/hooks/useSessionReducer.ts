@@ -167,6 +167,12 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         markExplanation: action.checkpoint.markExplanation || '',
       }
 
+    case 'SET_SESSION':
+      return {
+        ...state,
+        session: action.session,
+      }
+
     case 'SET_ERROR':
       return {
         ...state,

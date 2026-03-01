@@ -7,8 +7,8 @@ const TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 export async function saveCheckpoint(key: string, data: Record<string, unknown>) {
   try {
     await AsyncStorage.setItem(key, JSON.stringify({ ...data, _ts: Date.now() }))
-  } catch {
-    // storage full or unavailable — non-blocking
+  } catch (err) {
+    if (__DEV__) console.error('saveCheckpoint failed:', err)
   }
 }
 
@@ -22,7 +22,8 @@ export async function loadCheckpoint(key: string) {
       return null
     }
     return data
-  } catch {
+  } catch (err) {
+    if (__DEV__) console.error('loadCheckpoint failed:', err)
     return null
   }
 }
@@ -30,7 +31,7 @@ export async function loadCheckpoint(key: string) {
 export async function clearCheckpoint(key: string) {
   try {
     await AsyncStorage.removeItem(key)
-  } catch {
-    // non-blocking
+  } catch (err) {
+    if (__DEV__) console.error('clearCheckpoint failed:', err)
   }
 }

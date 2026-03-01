@@ -65,6 +65,7 @@ export type SessionAction =
   | { type: 'SUBMIT_QUALITY'; signal: string }
   | { type: 'RETRY' }
   | { type: 'RESTORE_CHECKPOINT'; checkpoint: Checkpoint }
+  | { type: 'SET_SESSION'; session: Session }
   | { type: 'SET_ERROR'; error: string }
 
 export interface SessionState {

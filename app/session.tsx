@@ -9,6 +9,7 @@ import { useWeaknessSRS } from '../src/hooks/useWeaknessSRS'
 import { PHASE_COMPONENTS } from '../src/components/session'
 import { LoadingScreen, ErrorBoundary } from '../src/components/ui'
 import { loadCheckpoint, SESSION_KEY } from '../src/lib/sessionCheckpoint'
+import { getSession } from '../src/lib/storage'
 
 export default function SessionScreen() {
   const router = useRouter()
@@ -38,8 +39,17 @@ export default function SessionScreen() {
     startedRef.current = true
 
     if (params.checkpointId) {
-      loadCheckpoint(SESSION_KEY).then((cp) => {
-        if (cp) dispatch({ type: 'RESTORE_CHECKPOINT', checkpoint: cp })
+      loadCheckpoint(SESSION_KEY).then(async (cp) => {
+        if (cp) {
+          dispatch({ type: 'RESTORE_CHECKPOINT', checkpoint: cp })
+          try {
+            const session = await getSession(cp.sessionId)
+            dispatch({ type: 'SET_SESSION', session })
+          } catch (err) {
+            if (__DEV__) console.error('Failed to restore session:', err)
+            dispatch({ type: 'SET_ERROR', error: 'Could not restore session' })
+          }
+        }
       })
     } else {
       sideEffects.startSession(params.promptType || 'reveal', params.promptText || '')
