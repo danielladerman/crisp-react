@@ -9,7 +9,8 @@ import { usePromptEngine } from '../../src/hooks/usePromptEngine'
 import { useWeaknessSRS } from '../../src/hooks/useWeaknessSRS'
 import { DEFAULT_PROMPTS } from '../../src/lib/prompts'
 import { getPersonalizedPrompts } from '../../src/lib/intakeMapping'
-import { getVoiceModel, getSessionCount, getTodaySession } from '../../src/lib/storage'
+import { getVoiceModel, getSessionCount, getTodaySession, getFocusMode, setFocusMode } from '../../src/lib/storage'
+import type { FocusMode } from '../../src/lib/storage'
 import { loadCheckpoint, clearCheckpoint, SESSION_KEY } from '../../src/lib/sessionCheckpoint'
 import { colors } from '../../src/lib/theme'
 
@@ -25,6 +26,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [checkpoint, setCheckpoint] = useState<any>(null)
+  const [focusMode, setFocusModeState] = useState<FocusMode>('mixed')
 
   const { selectPrompt } = usePromptEngine({
     userId: user?.id,
@@ -47,6 +49,8 @@ export default function HomeScreen() {
         }
         const cp = await loadCheckpoint(SESSION_KEY)
         setCheckpoint(cp)
+        const fm = await getFocusMode()
+        setFocusModeState(fm)
       } catch (err) {
         if (__DEV__) console.error('Home data load:', err)
       }
@@ -101,6 +105,7 @@ export default function HomeScreen() {
           promptType: prompt.promptType,
           promptText: prompt.promptText,
           sessionCount: String(sessionCount),
+          focusMode,
         },
       })
     } catch (err) {
@@ -108,7 +113,7 @@ export default function HomeScreen() {
     } finally {
       setLoading(false)
     }
-  }, [sessionCount, user, selectPrompt])
+  }, [sessionCount, user, selectPrompt, focusMode])
 
   const handleResumeCheckpoint = useCallback(() => {
     if (!checkpoint) return
@@ -127,6 +132,16 @@ export default function HomeScreen() {
     await clearCheckpoint(SESSION_KEY)
     setCheckpoint(null)
   }, [])
+
+  const handleFocusMode = useCallback(async (mode: FocusMode) => {
+    const prev = focusMode
+    setFocusModeState(mode)
+    try {
+      await setFocusMode(mode)
+    } catch {
+      setFocusModeState(prev)
+    }
+  }, [focusMode])
 
   if (pageLoading) {
     return (
@@ -178,6 +193,21 @@ export default function HomeScreen() {
             {greeting}{firstName ? `, ${firstName}` : ''}.
           </Text>
           <Text style={styles.readyText}>Ready to practice?</Text>
+
+          {/* Focus mode selector */}
+          <View style={styles.focusRow}>
+            {(['professional', 'relational', 'mixed'] as const).map((mode) => (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.focusChip, focusMode === mode && styles.focusChipActive]}
+                onPress={() => handleFocusMode(mode)}
+              >
+                <Text style={[styles.focusChipText, focusMode === mode && styles.focusChipTextActive]}>
+                  {mode === 'professional' ? 'Pro' : mode === 'relational' ? 'Personal' : 'Mixed'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
           <TouchableOpacity
             style={[styles.startButton, loading && styles.startButtonDisabled]}
@@ -258,6 +288,27 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: colors.ink,
     marginBottom: 48,
+  },
+  focusRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 32,
+  },
+  focusChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: colors.paperDeep,
+  },
+  focusChipActive: {
+    backgroundColor: colors.ink,
+  },
+  focusChipText: {
+    fontSize: 13,
+    color: colors.inkGhost,
+  },
+  focusChipTextActive: {
+    color: colors.paper,
   },
   startButton: {
     backgroundColor: colors.ink,

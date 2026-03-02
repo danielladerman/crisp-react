@@ -1,9 +1,11 @@
 // src/components/session/RespondingPhase.tsx
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Text, Alert, StyleSheet } from 'react-native'
 import type { SessionState, SessionAction } from '../../types/session'
 import { Button, TextArea, ScreenContainer, BackButton } from '../ui'
 import { colors } from '../../lib/theme'
+
+const TIMER_SECONDS = 90
 
 interface Props {
   state: SessionState
@@ -14,7 +16,29 @@ interface Props {
 
 export function RespondingPhase({ state, dispatch, sideEffects, onClose }: Props) {
   const [text, setText] = useState('')
+  const [secondsLeft, setSecondsLeft] = useState(TIMER_SECONDS)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isDeepDive = !!state.openQuestion
+
+  // Advisory countdown timer
+  useEffect(() => {
+    timerRef.current = setInterval(() => {
+      setSecondsLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current!)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [])
+
+  const minutes = Math.floor(secondsLeft / 60)
+  const seconds = secondsLeft % 60
+  const timerExpired = secondsLeft === 0
 
   const handleSubmit = useCallback(async () => {
     if (!text.trim()) return
@@ -40,6 +64,9 @@ export function RespondingPhase({ state, dispatch, sideEffects, onClose }: Props
         <Text style={styles.exchangeCount}>Exchange {state.deepDiveCount + 1} of 10</Text>
       )}
       <Text style={styles.prompt}>{state.openQuestion || state.prompt?.promptText}</Text>
+      <Text style={[styles.timer, timerExpired && styles.timerExpired]}>
+        {timerExpired ? 'Submit when ready' : `${minutes}:${seconds.toString().padStart(2, '0')}`}
+      </Text>
       <TextArea value={text} onChangeText={setText} />
       <Button onPress={handleSubmit} disabled={!text.trim()}>Submit</Button>
     </ScreenContainer>
@@ -57,6 +84,15 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     lineHeight: 28,
     color: colors.ink,
-    marginBottom: 32,
+    marginBottom: 16,
+  },
+  timer: {
+    fontSize: 13,
+    color: colors.inkGhost,
+    textAlign: 'right',
+    marginBottom: 16,
+  },
+  timerExpired: {
+    color: colors.gold,
   },
 })

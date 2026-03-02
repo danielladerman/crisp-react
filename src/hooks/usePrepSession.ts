@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { createPrepSession, updatePrepSession, upsertVoiceModel } from '../lib/storage'
-import { streamClaude, callClaude } from '../lib/claude'
+import { callClaudeWithCallbacks, callClaude } from '../lib/claude'
 import { PREP_COACHING_SYSTEM_PROMPT, KEY_MESSAGES_SYSTEM_PROMPT, VOICE_MODEL_UPDATE_PROMPT } from '../lib/prompts'
 import { getVoiceModel } from '../lib/storage'
 import { saveCheckpoint, clearCheckpoint, PREP_KEY } from '../lib/sessionCheckpoint'
@@ -37,7 +37,7 @@ export function usePrepSession({ userId, sessionCount = 0 }) {
       setCurrentResponse('')
       setError(null)
 
-      await streamClaude({
+      await callClaudeWithCallbacks({
         systemPrompt,
         messages,
         onChunk: (text) => setCurrentResponse(text),
@@ -82,7 +82,7 @@ export function usePrepSession({ userId, sessionCount = 0 }) {
     const voiceModel = voiceModelRef.current
     const systemPrompt = `${PREP_COACHING_SYSTEM_PROMPT}${voiceModel ? `\n\nVOICE MODEL:\n${JSON.stringify(voiceModel, null, 2)}` : ''}`
 
-    await streamClaude({
+    await callClaudeWithCallbacks({
       systemPrompt,
       messages: newExchanges,
       onChunk: (text) => setCurrentResponse(text),

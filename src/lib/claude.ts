@@ -105,3 +105,25 @@ export async function callClaude({ systemPrompt, messages, model = 'claude-sonne
   const data = await response.json()
   return data.content[0].text
 }
+
+// Non-streaming variant with the same callback interface as streamClaude.
+// React Native's fetch does not support ReadableStream, so we use a normal
+// JSON response and deliver the full text via onDone in one shot.
+export async function callClaudeWithCallbacks({ systemPrompt, messages, onChunk: _onChunk, onDone, onError, model = 'claude-sonnet-4-6', maxTokens = 2000 }: StreamOptions) {
+  try {
+    const response = await proxyFetch({ systemPrompt, messages, model, maxTokens, stream: false })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }))
+      throw new Error(error.error?.message || `API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const fullText = data.content[0].text
+    onDone(fullText)
+    return fullText
+  } catch (err) {
+    onError(err as Error)
+    throw err
+  }
+}

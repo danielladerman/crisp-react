@@ -1,4 +1,5 @@
 // src/components/session/FeedbackPhase.tsx
+import { useMemo } from 'react'
 import { Text, ActivityIndicator, StyleSheet, View } from 'react-native'
 import type { SessionState, SessionAction } from '../../types/session'
 import { Button, Card, ScreenContainer } from '../ui'
@@ -11,7 +12,11 @@ interface Props {
 }
 
 export function FeedbackPhase({ state, dispatch }: Props) {
-  const feedbackParts = state.feedback ? parseFeedback(state.feedback) : null
+  // Only parse when streaming is done — avoids re-parsing on every chunk
+  const feedbackParts = useMemo(
+    () => (!state.feedbackStreaming && state.feedback) ? parseFeedback(state.feedback) : null,
+    [state.feedbackStreaming, state.feedback],
+  )
 
   return (
     <ScreenContainer scroll>

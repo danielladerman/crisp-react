@@ -1,8 +1,8 @@
 // src/hooks/useSessionSideEffects.ts
 import { useEffect, useRef, useCallback, type Dispatch } from 'react'
 import type { SessionState, SessionAction, Message } from '../types/session'
-import { createSession, updateSession, getVoiceModel, upsertVoiceModel } from '../lib/storage'
-import { streamClaude, callClaude } from '../lib/claude'
+import { createSession, updateSession, addToLibrary, getVoiceModel, upsertVoiceModel } from '../lib/storage'
+import { callClaudeWithCallbacks, callClaude } from '../lib/claude'
 import { COACHING_SYSTEM_PROMPT, DEEP_DIVE_SYSTEM_PROMPT, VOICE_MODEL_UPDATE_PROMPT } from '../lib/prompts'
 import { detectWeaknessFromFeedback } from '../lib/frameworks'
 import { saveCheckpoint, clearCheckpoint, SESSION_KEY } from '../lib/sessionCheckpoint'
@@ -12,6 +12,7 @@ interface SideEffectsConfig {
   userId?: string
   sessionCount: number
   voiceModel?: any
+  focusMode?: 'professional' | 'relational' | 'mixed'
   onWeaknessDetected?: ((id: string) => void) | null
 }
 
@@ -56,16 +57,20 @@ export function useSessionSideEffects(
         ? `\n\nVOICE MODEL:\n${JSON.stringify(config.voiceModel, null, 2)}`
         : ''
 
+      const focusModeContext = config.focusMode && config.focusMode !== 'mixed'
+        ? `\nFOCUS MODE: ${config.focusMode} — bias prompts, examples, and observations toward ${config.focusMode === 'professional' ? 'professional contexts (pitches, meetings, presentations, leadership)' : 'relational contexts (personal conversations, difficult talks, emotional clarity)'}.`
+        : ''
+
       const systemPrompt = isDeepDive
         ? `${DEEP_DIVE_SYSTEM_PROMPT}\n\nSession count: ${config.sessionCount}\nContext from previous exchange is in the conversation history.`
-        : `${COACHING_SYSTEM_PROMPT}\n\nSession count for this user: ${config.sessionCount}${voiceModelContext}`
+        : `${COACHING_SYSTEM_PROMPT}\n\nSession count for this user: ${config.sessionCount}${focusModeContext}${voiceModelContext}`
 
       const messages: Message[] = [
         ...state.conversationHistory,
         { role: 'user', content: responseText },
       ]
 
-      await streamClaude({
+      await callClaudeWithCallbacks({
         systemPrompt,
         messages,
         onChunk: (text) => dispatch({ type: 'FEEDBACK_CHUNK', text }),
@@ -123,12 +128,35 @@ export function useSessionSideEffects(
     const durationSeconds = state.startTime
       ? Math.round((Date.now() - state.startTime) / 1000)
       : null
-    await updateSession(state.session.id, {
-      markedMoment: markedText,
-      durationSeconds,
-      // NOTE: completed is NOT set here (fixes B8)
-    })
-  }, [state.session, state.startTime])
+    try {
+      await updateSession(state.session.id, {
+        markedMoment: markedText,
+        durationSeconds,
+        // NOTE: completed is NOT set here (fixes B8)
+      })
+    } catch (err) {
+      if (__DEV__) console.error('saveMark updateSession failed:', err)
+      // Continue to library add even if session update fails
+    }
+
+    // Populate library when user marks a non-empty moment
+    if (markedText && state.session.user_id) {
+      try {
+        const parts = parseFeedback(state.feedback)
+        await addToLibrary({
+          userId: state.session.user_id,
+          sessionId: state.session.id,
+          markedText,
+          promptText: state.prompt?.promptText || '',
+          aiObservation: parts.name || parts.echo,
+          promptType: state.prompt?.promptType || '',
+          sessionNumber: config.sessionCount + 1,
+        })
+      } catch (err) {
+        if (__DEV__) console.error('addToLibrary failed:', err)
+      }
+    }
+  }, [state.session, state.startTime, state.feedback, state.prompt, config.sessionCount])
 
   // --- Save drill to DB ---
   const saveDrill = useCallback(async (response: string, skipped = false) => {
@@ -176,7 +204,7 @@ export function useSessionSideEffects(
         if (__DEV__) console.error('Voice model update failed:', err)
       }
     }
-  }, [state])
+  }, [state.session, state.feedback, state.sessionMode, state.prompt, state.responseText, state.drillResponse])
 
   // --- Retry logic (fixes B6) ---
   useEffect(() => {

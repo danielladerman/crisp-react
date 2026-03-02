@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { createSession, updateSession } from '../lib/storage'
-import { streamClaude } from '../lib/claude'
+import { callClaudeWithCallbacks } from '../lib/claude'
 import { COACHING_SYSTEM_PROMPT, DEEP_DIVE_SYSTEM_PROMPT } from '../lib/prompts'
 import { detectWeaknessFromFeedback } from '../lib/frameworks'
 import { saveCheckpoint, clearCheckpoint, SESSION_KEY } from '../lib/sessionCheckpoint'
@@ -98,7 +98,7 @@ export function useSession({ userId, sessionCount = 0, voiceModel = null, onWeak
       setFeedbackStreaming(true)
       setFeedback('')
 
-      await streamClaude({
+      await callClaudeWithCallbacks({
         systemPrompt,
         messages,
         onChunk: (text) => setFeedback(text),
@@ -165,7 +165,7 @@ export function useSession({ userId, sessionCount = 0, voiceModel = null, onWeak
       setFeedbackStreaming(true)
       setFeedback('')
 
-      await streamClaude({
+      await callClaudeWithCallbacks({
         systemPrompt: `${DEEP_DIVE_SYSTEM_PROMPT}\n\nSession count: ${sessionCount}\nContext from previous exchange is in the conversation history.`,
         messages,
         onChunk: (text) => setFeedback(text),

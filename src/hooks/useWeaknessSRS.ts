@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getActiveWeaknesses, upsertWeaknessSRS } from '../lib/storage'
 import {
   getWeaknessDrillsDue,
@@ -9,6 +9,9 @@ import {
 export function useWeaknessSRS(userId) {
   const [weaknesses, setWeaknesses] = useState([])
   const [loading, setLoading] = useState(true)
+  // Ref keeps latest weaknesses available without destabilizing callbacks
+  const weaknessesRef = useRef(weaknesses)
+  weaknessesRef.current = weaknesses
 
   useEffect(() => {
     if (!userId) return
@@ -22,7 +25,7 @@ export function useWeaknessSRS(userId) {
           setLoading(false)
         }
       } catch (err) {
-        console.error('Failed to load weaknesses:', err)
+        if (__DEV__) console.error('Failed to load weaknesses:', err)
         if (!cancelled) setLoading(false)
       }
     }
@@ -32,7 +35,7 @@ export function useWeaknessSRS(userId) {
   }, [userId])
 
   const recordDetection = useCallback(async (weaknessId) => {
-    const existing = weaknesses.find(w => w.weakness_id === weaknessId)
+    const existing = weaknessesRef.current.find(w => w.weakness_id === weaknessId)
 
     const updates = {
       sessions_active: (existing?.sessions_active || 0) + 1,
@@ -44,16 +47,15 @@ export function useWeaknessSRS(userId) {
 
     try {
       await upsertWeaknessSRS(userId, weaknessId, updates)
-      // Refresh local state
       const refreshed = await getActiveWeaknesses(userId)
       setWeaknesses(refreshed)
     } catch (err) {
-      console.error('Failed to record weakness detection:', err)
+      if (__DEV__) console.error('Failed to record weakness detection:', err)
     }
-  }, [userId, weaknesses])
+  }, [userId])
 
   const recordClean = useCallback(async (weaknessId) => {
-    const existing = weaknesses.find(w => w.weakness_id === weaknessId)
+    const existing = weaknessesRef.current.find(w => w.weakness_id === weaknessId)
     if (!existing) return
 
     const newCleanCount = (existing.sessions_clean || 0) + 1
@@ -69,16 +71,16 @@ export function useWeaknessSRS(userId) {
       const refreshed = await getActiveWeaknesses(userId)
       setWeaknesses(refreshed)
     } catch (err) {
-      console.error('Failed to record clean session:', err)
+      if (__DEV__) console.error('Failed to record clean session:', err)
     }
-  }, [userId, weaknesses])
+  }, [userId])
 
   const getDrillsDue = useCallback(() => {
-    return getWeaknessDrillsDue(weaknesses)
-  }, [weaknesses])
+    return getWeaknessDrillsDue(weaknessesRef.current)
+  }, [])
 
   const updateAfterDrill = useCallback(async (weaknessId, qualitySignal) => {
-    const existing = weaknesses.find(w => w.weakness_id === weaknessId)
+    const existing = weaknessesRef.current.find(w => w.weakness_id === weaknessId)
     const currentInterval = existing?.interval_days || 3
     const nextInterval = getNextInterval(currentInterval, qualitySignal)
 
@@ -92,9 +94,9 @@ export function useWeaknessSRS(userId) {
       const refreshed = await getActiveWeaknesses(userId)
       setWeaknesses(refreshed)
     } catch (err) {
-      console.error('Failed to update after drill:', err)
+      if (__DEV__) console.error('Failed to update after drill:', err)
     }
-  }, [userId, weaknesses])
+  }, [userId])
 
   return {
     weaknesses,

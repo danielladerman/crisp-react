@@ -54,6 +54,15 @@ export const INTAKE_QUESTIONS = [
       { id: 'habit', label: 'I just want to practice consistently' },
     ],
   },
+  {
+    id: 'focusMode',
+    question: 'Where would you most like to sharpen your expression?',
+    options: [
+      { id: 'professional', label: 'Professional — pitches, meetings, presentations' },
+      { id: 'relational', label: 'Relational — personal conversations, difficult talks' },
+      { id: 'mixed', label: 'Both — I want to sharpen across contexts' },
+    ],
+  },
 ]
 
 // ── Voice Model Mapping ─────────────────────────
@@ -102,10 +111,17 @@ const HORIZON_MAP = {
   habit: 'habit \u2014 consistent practice',
 }
 
-export function mapAnswersToVoiceModel(answers) {
+const FOCUS_MODE_MAP: Record<string, string> = {
+  professional: 'professional — pitches, meetings, presentations, leadership',
+  relational: 'relational — personal conversations, difficult talks, emotional clarity',
+  mixed: 'mixed — all communication contexts',
+}
+
+export function mapAnswersToVoiceModel(answers: Record<string, string>) {
   const gapData = CORE_GAP_FOCUS[answers.coreGap] || CORE_GAP_FOCUS.articulationGap
   return {
     currentFocus: gapData.currentFocus,
+    focusMode: FOCUS_MODE_MAP[answers.focusMode] || FOCUS_MODE_MAP.mixed,
     detectedWeaknesses: PRESSURE_WEAKNESSES[answers.pressurePattern] || [],
     pressureFocus: PRESSURE_FOCUS[answers.pressurePattern] || null,
     coreContext: CONTEXT_MAP[answers.environment] || CONTEXT_MAP.broad,

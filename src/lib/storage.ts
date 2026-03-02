@@ -155,25 +155,38 @@ export async function upsertVoiceModel(userId: string, model: Record<string, unk
 }
 
 // Library
-export async function addToLibrary({ userId, sessionId, markedText, promptText, aiObservation, promptType, markExplanation = null, secondaryCapture = null, sessionNumber = null }: { userId: string; sessionId: string; markedText: string; promptText: string; aiObservation: string; promptType: string; markExplanation?: string | null; secondaryCapture?: string | null; sessionNumber?: number | null }) {
+export async function addToLibrary({ userId, sessionId, markedText, promptText, aiObservation, promptType, markExplanation = null, secondaryCapture = null, sessionNumber = null, source = 'session' }: { userId: string; sessionId?: string; markedText: string; promptText: string; aiObservation: string; promptType: string; markExplanation?: string | null; secondaryCapture?: string | null; sessionNumber?: number | null; source?: 'session' | 'manual' }) {
+  const row: Record<string, unknown> = {
+    user_id: userId,
+    marked_text: markedText,
+    prompt_text: promptText,
+    ai_observation: aiObservation,
+    prompt_type: promptType,
+    mark_explanation: markExplanation,
+    secondary_capture: secondaryCapture,
+    session_number: sessionNumber,
+    source,
+  }
+  if (sessionId) row.session_id = sessionId
+
   const { data, error } = await supabase
     .from('library')
-    .insert({
-      user_id: userId,
-      session_id: sessionId,
-      marked_text: markedText,
-      prompt_text: promptText,
-      ai_observation: aiObservation,
-      prompt_type: promptType,
-      mark_explanation: markExplanation,
-      secondary_capture: secondaryCapture,
-      session_number: sessionNumber,
-    })
+    .insert(row)
     .select()
     .single()
 
   if (error) throw error
   return data
+}
+
+export async function toggleLibraryPin(entryId: string, userId: string, pinned: boolean) {
+  const { error } = await supabase
+    .from('library')
+    .update({ pinned, updated_at: new Date().toISOString() })
+    .eq('id', entryId)
+    .eq('user_id', userId)
+
+  if (error) throw error
 }
 
 export async function updateLibraryEntry(entryId: string, userId: string, updates: Record<string, unknown>) {
@@ -230,6 +243,18 @@ export async function getLibraryFiltered(userId: string, filter = 'all') {
       .select('*, sessions!inner(quality_signal)')
       .eq('user_id', userId)
       .eq('sessions.quality_signal', 'breakthrough')
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    return data || []
+  }
+
+  if (filter === 'pinned') {
+    const { data, error } = await supabase
+      .from('library')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('pinned', true)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -429,6 +454,25 @@ export async function getRecentNotifications(userId: string, limit = 10) {
 
   if (error) throw error
   return data || []
+}
+
+// ── Focus Mode ──────────────────────────────────
+
+const FOCUS_MODE_KEY = 'crisp_focus_mode'
+export type FocusMode = 'professional' | 'relational' | 'mixed'
+
+export async function getFocusMode(): Promise<FocusMode> {
+  try {
+    const val = await AsyncStorage.getItem(FOCUS_MODE_KEY)
+    if (val === 'professional' || val === 'relational' || val === 'mixed') return val
+  } catch {
+    // fall through
+  }
+  return 'mixed'
+}
+
+export async function setFocusMode(mode: FocusMode) {
+  await AsyncStorage.setItem(FOCUS_MODE_KEY, mode)
 }
 
 // ── Intake Answers ──────────────────────────────

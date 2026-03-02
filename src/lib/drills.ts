@@ -616,6 +616,6 @@ export function getDrillsByCategory(categoryId) {
   return DRILLS.filter(d => d.category === categoryId)
 }
 
-export function getDrillById(drillId) {
+export function getDrillById(drillId: string) {
   return DRILLS.find(d => d.id === drillId)
 }
