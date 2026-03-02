@@ -11,7 +11,7 @@ import {
 import { ScreenContainer, Card } from '../../src/components/ui'
 import { colors, spacing } from '../../src/lib/theme'
 
-type FilterType = 'all' | 'pinned' | 'breakthroughs' | 'prep'
+type FilterType = 'all' | 'pinned'
 
 interface LibraryEntry {
   id: string
@@ -27,8 +27,6 @@ interface LibraryEntry {
 const FILTERS: { key: FilterType; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'pinned', label: 'Pinned' },
-  { key: 'breakthroughs', label: 'Breakthroughs' },
-  { key: 'prep', label: 'Prep' },
 ]
 
 function formatDate(dateStr: string) {

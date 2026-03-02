@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -10,6 +10,7 @@ import {
 import {
   createWorkoutSession, upsertWorkoutProgress, getVoiceModel,
   upsertVoiceModel, getCategoryCompletions, getSessionCount,
+  getRecentSessions,
 } from '../../src/lib/storage'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { colors } from '../../src/lib/theme'
@@ -24,6 +25,17 @@ export default function WorkoutsScreen() {
   const [response, setResponse] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
+  const [suggestedDrills, setSuggestedDrills] = useState<string[]>([])
+
+  // Load suggested drills from most recent session
+  useEffect(() => {
+    if (!user?.id) return
+    getRecentSessions(user.id, 1).then(sessions => {
+      if (sessions[0]?.suggested_drills) {
+        setSuggestedDrills(sessions[0].suggested_drills)
+      }
+    }).catch(() => {})
+  }, [user?.id])
 
   const drills = selectedCategory ? getDrillsByCategory(selectedCategory) : []
   const category = CATEGORIES.find(c => c.id === selectedCategory)
@@ -162,6 +174,27 @@ export default function WorkoutsScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.pageTitle}>Workout Library</Text>
         <Text style={styles.pageSubtitle}>Isolated technique practice. Pick a category.</Text>
+
+        {/* Suggested drills from last session */}
+        {suggestedDrills.length > 0 && (
+          <View style={styles.suggestedSection}>
+            <Text style={styles.suggestedTitle}>SUGGESTED FOR YOU</Text>
+            {suggestedDrills.map(drillId => {
+              const drill = getDrillById(drillId)
+              if (!drill) return null
+              return (
+                <TouchableOpacity
+                  key={drill.id}
+                  style={styles.suggestedCard}
+                  onPress={() => handleStartDrill(drill)}
+                >
+                  <Text style={styles.suggestedName}>{drill.name}</Text>
+                  <Text style={styles.suggestedMeta}>{drill.category} · {drill.difficulty}</Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        )}
 
         <View style={styles.categoryList}>
           {CATEGORIES.map((cat) => (
@@ -343,5 +376,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.inkMuted,
     marginBottom: 40,
+  },
+  suggestedSection: {
+    marginBottom: 28,
+  },
+  suggestedTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    color: colors.gold,
+    marginBottom: 12,
+  },
+  suggestedCard: {
+    backgroundColor: colors.paperDim,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.gold,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  suggestedName: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.ink,
+  },
+  suggestedMeta: {
+    fontSize: 13,
+    color: colors.inkMuted,
+    marginTop: 4,
+    textTransform: 'capitalize',
   },
 })

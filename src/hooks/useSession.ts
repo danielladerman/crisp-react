@@ -1,298 +1,340 @@
+// src/hooks/useSession.ts — Core session hook (simplified 3-phase flow)
+// Replaces: useSessionReducer + useSessionSideEffects + usePromptEngine
+
 import { useState, useCallback, useRef } from 'react'
-import { createSession, updateSession } from '../lib/storage'
-import { callClaudeWithCallbacks } from '../lib/claude'
-import { COACHING_SYSTEM_PROMPT, DEEP_DIVE_SYSTEM_PROMPT } from '../lib/prompts'
-import { detectWeaknessFromFeedback } from '../lib/frameworks'
+import type { SessionPhase, Session, Interaction, Pattern } from '../types/session'
+import {
+  createSession, updateSession, addInteraction,
+  getRecentInteractions, upsertPattern, getVoiceModel, upsertVoiceModel,
+} from '../lib/storage'
+import { callClaudeWithCallbacks, callClaude } from '../lib/claude'
+import {
+  COACHING_PROMPT, DIVE_DEEPER_PROMPT, PATTERN_ANALYSIS_PROMPT,
+  WORKOUT_SUGGESTION_PROMPT, VOICE_MODEL_UPDATE_PROMPT,
+} from '../lib/prompts'
+import { DRILLS } from '../lib/drills'
 import { saveCheckpoint, clearCheckpoint, SESSION_KEY } from '../lib/sessionCheckpoint'
-// Note: saveCheckpoint/clearCheckpoint are async in RN (AsyncStorage) but fire-and-forget is fine
-import parseFeedback from '../lib/parseFeedback'
 
-export function useSession({ userId, sessionCount = 0, voiceModel = null, onWeaknessDetected = null }) {
-  const [session, setSession] = useState(null)
-  const [phase, setPhase] = useState('prompt') // prompt | responding | thinking | feedback | drilling | marking | explaining | quality | closed
-  const [feedback, setFeedback] = useState('')
-  const [feedbackStreaming, setFeedbackStreaming] = useState(false)
-  const [error, setError] = useState(null)
-  const [deepDiveCount, setDeepDiveCount] = useState(0)
-  const [conversationHistory, setConversationHistory] = useState([])
-  const [drillText, setDrillText] = useState(null)
-  const [drillResponse, setDrillResponse] = useState('')
-  const [markExplanation, setMarkExplanation] = useState('')
-  const [qualitySignal, setQualitySignal] = useState(null)
-  const [sessionMode, setSessionMode] = useState('daily')
-  const startTimeRef = useRef(null)
-  // Track prompt info for checkpointing
-  const promptRef = useRef({ promptType: null, promptText: null })
+interface SessionConfig {
+  userId: string
+  sessionCount: number
+  voiceModel?: unknown
+  patterns?: Pattern[]
+  focusMode?: string
+}
 
-  const checkpoint = useCallback((phaseOverride, extra = {}) => {
-    if (!session) return
-    saveCheckpoint(SESSION_KEY, {
-      sessionId: session.id,
-      phase: phaseOverride,
-      promptType: promptRef.current.promptType,
-      promptText: promptRef.current.promptText,
-      feedback,
-      conversationHistory,
-      drillText,
-      drillResponse,
-      deepDiveCount,
-      sessionMode,
-      ...extra,
-    })
-  }, [session, feedback, conversationHistory, drillText, drillResponse, deepDiveCount, sessionMode])
+export function useSession(config: SessionConfig) {
+  const [phase, setPhase] = useState<SessionPhase>('prompt')
+  const [session, setSession] = useState<Session | null>(null)
+  const [interactions, setInteractions] = useState<Interaction[]>([])
+  const [feedbackText, setFeedbackText] = useState('')
+  const [feedbackLoading, setFeedbackLoading] = useState(false)
+  const [suggestedDrills, setSuggestedDrills] = useState<string[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const configRef = useRef(config)
+  configRef.current = config
 
-  const restoreFromCheckpoint = useCallback((cp) => {
-    setPhase(cp.phase)
-    setFeedback(cp.feedback || '')
-    setConversationHistory(cp.conversationHistory || [])
-    setDrillText(cp.drillText || null)
-    setDrillResponse(cp.drillResponse || '')
-    setDeepDiveCount(cp.deepDiveCount || 0)
-    setSessionMode(cp.sessionMode || 'daily')
-    promptRef.current = { promptType: cp.promptType, promptText: cp.promptText }
-  }, [])
+  // ── Start Session ────────────────────────────
 
-  const startSession = useCallback(async ({ promptType, promptText }) => {
+  const startSession = useCallback(async (promptType: string, promptText: string, responseMode: 'text' | 'voice' = 'text') => {
     try {
-      promptRef.current = { promptType, promptText }
       const newSession = await createSession({
-        userId,
+        userId: config.userId,
         promptType,
         promptText,
+        responseMode,
       })
       setSession(newSession)
       setPhase('responding')
-      startTimeRef.current = Date.now()
+      setInteractions([])
+      setFeedbackText('')
+      setSuggestedDrills(null)
+      setError(null)
+
       saveCheckpoint(SESSION_KEY, {
         sessionId: newSession.id,
         phase: 'responding',
         promptType,
         promptText,
       })
+
       return newSession
     } catch (err) {
-      setError((err instanceof Error ? err.message : 'Unknown error'))
+      setError(err instanceof Error ? err.message : 'Failed to start session')
       throw err
     }
-  }, [userId])
+  }, [config.userId])
 
-  const submitResponse = useCallback(async (responseText) => {
+  // ── Build messages array from interactions ───
+
+  function buildMessages(ints: Interaction[]): Array<{ role: string; content: string }> {
+    return ints.map(i => ({ role: i.role, content: i.content }))
+  }
+
+  // ── Build coaching system prompt ─────────────
+
+  function buildCoachingPrompt(): string {
+    const cfg = configRef.current
+    let prompt = COACHING_PROMPT
+
+    if (cfg.voiceModel) {
+      prompt += `\n\nVOICE MODEL:\n${JSON.stringify(cfg.voiceModel, null, 2)}`
+    }
+
+    if (cfg.focusMode && cfg.focusMode !== 'mixed') {
+      prompt += `\nFOCUS MODE: ${cfg.focusMode} — bias observations toward ${cfg.focusMode === 'professional' ? 'professional contexts' : 'relational contexts'}.`
+    }
+
+    if (cfg.patterns && cfg.patterns.length > 0) {
+      const patternSummary = cfg.patterns.map(p => `${p.pattern_type}: ${p.pattern_id} — ${p.description}`).join('\n')
+      prompt += `\n\nKNOWN PATTERNS:\n${patternSummary}`
+    }
+
+    prompt += `\n\nSession count: ${cfg.sessionCount}`
+    return prompt
+  }
+
+  // ── Submit Response (triggers AI feedback) ───
+
+  const submitResponse = useCallback(async (text: string, audioUrl?: string | null) => {
     if (!session) return
-    setPhase('thinking')
     setError(null)
+    setFeedbackLoading(true)
 
     try {
-      await updateSession(session.id, { responseText })
+      // Save user interaction
+      const userInteraction = await addInteraction({
+        sessionId: session.id,
+        userId: config.userId,
+        role: 'user',
+        content: text,
+        interactionType: 'response',
+        audioUrl: audioUrl || null,
+      })
 
-      const voiceModelContext = voiceModel
-        ? `\n\nVOICE MODEL:\n${JSON.stringify(voiceModel, null, 2)}`
-        : ''
+      const updatedInteractions = [...interactions, userInteraction]
+      setInteractions(updatedInteractions)
 
-      const systemPrompt = `${COACHING_SYSTEM_PROMPT}\n\nSession count for this user: ${sessionCount}${voiceModelContext}`
-
-      const messages = [
-        ...conversationHistory,
-        { role: 'user', content: responseText },
-      ]
-
-      setFeedbackStreaming(true)
-      setFeedback('')
+      // Call Claude for coaching feedback
+      const messages = buildMessages(updatedInteractions)
+      const systemPrompt = buildCoachingPrompt()
 
       await callClaudeWithCallbacks({
         systemPrompt,
         messages,
-        onChunk: (text) => setFeedback(text),
+        onChunk: () => {}, // non-streaming, unused
         onDone: async (fullText) => {
-          setFeedbackStreaming(false)
+          // Save AI feedback interaction
+          const aiInteraction = await addInteraction({
+            sessionId: session.id,
+            userId: config.userId,
+            role: 'assistant',
+            content: fullText,
+            interactionType: 'feedback',
+          })
+
+          const finalInteractions = [...updatedInteractions, aiInteraction]
+          setInteractions(finalInteractions)
+          setFeedbackText(fullText)
+          setFeedbackLoading(false)
           setPhase('feedback')
-          setConversationHistory([
-            ...messages,
-            { role: 'assistant', content: fullText },
-          ])
 
-          const parts = parseFeedback(fullText)
-          setDrillText(parts.drill)
-          await updateSession(session.id, {
-            feedbackEcho: parts.echo,
-            feedbackName: parts.name,
-            feedbackDrill: parts.drill,
-            feedbackOpen: parts.open,
-            deepDiveExchanges: [...messages, { role: 'assistant', content: fullText }],
+          // Checkpoint
+          saveCheckpoint(SESSION_KEY, {
+            sessionId: session.id,
+            phase: 'feedback',
+            promptType: session.prompt_type,
+            promptText: session.prompt_text,
+            feedbackText: fullText,
           })
 
-          checkpoint('feedback', {
-            feedback: fullText,
-            conversationHistory: [...messages, { role: 'assistant', content: fullText }],
-            drillText: parts.drill,
-            responseText,
-          })
-
-          // Detect weakness from feedback and notify caller
-          const detectedWeakness = detectWeaknessFromFeedback(parts.name, parts.drill)
-          if (detectedWeakness && onWeaknessDetected) {
-            onWeaknessDetected(detectedWeakness)
-          }
+          // Fire background tasks (non-blocking)
+          runPostSessionTasks(session, finalInteractions, fullText)
         },
         onError: (err) => {
-          setFeedbackStreaming(false)
-          setError((err instanceof Error ? err.message : 'Unknown error'))
-          setPhase('feedback')
+          setFeedbackLoading(false)
+          setError(err instanceof Error ? err.message : 'Failed to get feedback')
+          setPhase('feedback') // show error in feedback phase
         },
+        maxTokens: 2000,
       })
     } catch (err) {
-      setError((err instanceof Error ? err.message : 'Unknown error'))
-      setPhase('feedback')
+      setFeedbackLoading(false)
+      setError(err instanceof Error ? err.message : 'Failed to submit response')
     }
-  }, [session, sessionCount, voiceModel, conversationHistory, onWeaknessDetected, checkpoint])
+  }, [session, interactions, config.userId])
 
-  const goDeeper = useCallback(async (openQuestion) => {
-    if (deepDiveCount >= 10) return
-    setDeepDiveCount(prev => prev + 1)
-    setPhase('responding')
-    // The Open question becomes the next prompt — user responds to it
-  }, [deepDiveCount])
+  // ── Dive Deeper (stay in responding phase) ───
 
-  const submitDeepDive = useCallback(async (responseText) => {
-    setPhase('thinking')
+  const diveDeeper = useCallback(async (text: string) => {
+    if (!session) return
     setError(null)
 
     try {
-      const messages = [
-        ...conversationHistory,
-        { role: 'user', content: responseText },
-      ]
+      // Save user's dive-deeper message
+      const userInteraction = await addInteraction({
+        sessionId: session.id,
+        userId: config.userId,
+        role: 'user',
+        content: text,
+        interactionType: 'dive_deeper',
+      })
 
-      setFeedbackStreaming(true)
-      setFeedback('')
+      const updatedInteractions = [...interactions, userInteraction]
+      setInteractions(updatedInteractions)
+      setFeedbackLoading(true)
+
+      // Get AI follow-up (conversational, not formal coaching)
+      const messages = buildMessages(updatedInteractions)
 
       await callClaudeWithCallbacks({
-        systemPrompt: `${DEEP_DIVE_SYSTEM_PROMPT}\n\nSession count: ${sessionCount}\nContext from previous exchange is in the conversation history.`,
+        systemPrompt: DIVE_DEEPER_PROMPT,
         messages,
-        onChunk: (text) => setFeedback(text),
+        onChunk: () => {},
         onDone: async (fullText) => {
-          setFeedbackStreaming(false)
-          setPhase('feedback')
-          const updatedHistory = [...messages, { role: 'assistant', content: fullText }]
-          setConversationHistory(updatedHistory)
-
-          await updateSession(session.id, { deepDiveExchanges: updatedHistory })
-
-          checkpoint('feedback', {
-            feedback: fullText,
-            conversationHistory: updatedHistory,
+          const aiInteraction = await addInteraction({
+            sessionId: session.id,
+            userId: config.userId,
+            role: 'assistant',
+            content: fullText,
+            interactionType: 'follow_up',
           })
+
+          setInteractions(prev => [...prev, aiInteraction])
+          setFeedbackLoading(false)
+          // Stay in responding phase — this is the key behavior
         },
         onError: (err) => {
-          setFeedbackStreaming(false)
-          setError((err instanceof Error ? err.message : 'Unknown error'))
-          setPhase('feedback')
+          setFeedbackLoading(false)
+          setError(err instanceof Error ? err.message : 'Failed to dive deeper')
         },
+        maxTokens: 500,
       })
     } catch (err) {
-      setError((err instanceof Error ? err.message : 'Unknown error'))
-      setPhase('feedback')
+      setFeedbackLoading(false)
+      setError(err instanceof Error ? err.message : 'Failed to dive deeper')
     }
-  }, [session, sessionCount, conversationHistory, checkpoint])
+  }, [session, interactions, config.userId])
 
-  const startMarking = useCallback(() => {
-    if (drillText && phase === 'feedback') {
-      setPhase('drilling')
-    } else {
-      setPhase('quality')
-    }
-  }, [drillText, phase])
+  // ── Try Again (back to responding) ───────────
 
-  const completeMark = useCallback(async (markedText) => {
-    if (!session) return
-
-    const durationSeconds = startTimeRef.current
-      ? Math.round((Date.now() - startTimeRef.current) / 1000)
-      : null
-
-    await updateSession(session.id, {
-      markedMoment: markedText,
-      durationSeconds,
-      completed: true,
-    })
-
-    setPhase('explaining')
-    checkpoint('explaining', { markedText })
-  }, [session, checkpoint])
-
-  const submitDrill = useCallback(async (response) => {
-    if (!session) return
-    setDrillResponse(response)
-    await updateSession(session.id, {
-      drillResponse: response,
-    })
-    setPhase('quality')
-    checkpoint('quality', { drillResponse: response })
-  }, [session, checkpoint])
-
-  const skipDrill = useCallback(async () => {
-    if (!session) return
-    await updateSession(session.id, {
-      drillSkipped: true,
-    })
-    setPhase('quality')
-  }, [session])
-
-  const submitExplanation = useCallback(async (text) => {
-    if (!session) return
-    setMarkExplanation(text)
-    await updateSession(session.id, {
-      markExplanation: text,
-    })
-    setPhase('quality')
-    checkpoint('quality', { markExplanation: text })
-  }, [session, checkpoint])
-
-  const skipExplanation = useCallback(() => {
-    setPhase('quality')
-  }, [])
-
-  const submitQuality = useCallback(async (signal) => {
-    if (!session) return
-    setQualitySignal(signal)
-    await updateSession(session.id, {
-      qualitySignal: signal,
-    })
-    setPhase('closed')
-    clearCheckpoint(SESSION_KEY)
-  }, [session])
-
-  const retryFeedback = useCallback(() => {
+  const tryAgain = useCallback(() => {
+    setPhase('responding')
+    setFeedbackText('')
     setError(null)
-    setPhase('thinking')
-    // Re-trigger the last submission
   }, [])
+
+  // ── Complete Session ─────────────────────────
+
+  const completeSession = useCallback(async () => {
+    if (!session) return
+    try {
+      await updateSession(session.id, { status: 'completed' })
+      clearCheckpoint(SESSION_KEY)
+      setPhase('done')
+    } catch (err) {
+      if (__DEV__) console.error('Failed to complete session:', err)
+      // Still mark done locally even if DB update fails
+      setPhase('done')
+    }
+  }, [session])
+
+  // ── Post-Session Background Tasks ────────────
+
+  async function runPostSessionTasks(sess: Session, ints: Interaction[], feedback: string) {
+    const cfg = configRef.current
+
+    // 1. Pattern analysis
+    try {
+      const recentInts = await getRecentInteractions(cfg.userId, 100)
+      const context = recentInts
+        .filter(i => i.role === 'user')
+        .map(i => i.content)
+        .join('\n---\n')
+
+      const result = await callClaude({
+        systemPrompt: PATTERN_ANALYSIS_PROMPT,
+        messages: [{ role: 'user', content: `Recent user responses across sessions:\n\n${context}` }],
+        maxTokens: 1000,
+      })
+
+      const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+      const parsed = JSON.parse(cleaned)
+
+      if (parsed.patterns && Array.isArray(parsed.patterns)) {
+        for (const p of parsed.patterns) {
+          await upsertPattern(cfg.userId, p, sess.id)
+        }
+      }
+    } catch (err) {
+      if (__DEV__) console.error('Pattern analysis failed:', err)
+    }
+
+    // 2. Voice model update
+    try {
+      const currentModel = await getVoiceModel(cfg.userId) || {}
+      const result = await callClaude({
+        systemPrompt: VOICE_MODEL_UPDATE_PROMPT,
+        messages: [{
+          role: 'user',
+          content: `CURRENT VOICE MODEL:\n${JSON.stringify(currentModel, null, 2)}\n\nSESSION DATA:\nPrompt: ${sess.prompt_text}\nSession Number: ${cfg.sessionCount + 1}\n\nINTERACTIONS:\n${ints.map(i => `[${i.role}] ${i.content}`).join('\n\n')}\n\nUpdate the voice model. Return only updated JSON.`,
+        }],
+        maxTokens: 3000,
+      })
+
+      const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+      const updatedModel = JSON.parse(cleaned)
+      await upsertVoiceModel(cfg.userId, updatedModel, cfg.sessionCount + 1)
+    } catch (err) {
+      if (__DEV__) console.error('Voice model update failed:', err)
+    }
+
+    // 3. Workout suggestions
+    try {
+      const drillList = DRILLS.map(d => `${d.id}: ${d.name} (${d.category})`).join('\n')
+      const patternList = (cfg.patterns || []).map(p => `${p.pattern_type}: ${p.description}`).join('\n')
+
+      const prompt = WORKOUT_SUGGESTION_PROMPT
+        .replace('{drills}', drillList)
+        .replace('{feedback}', feedback)
+        .replace('{patterns}', patternList || 'None detected yet')
+
+      const result = await callClaude({
+        systemPrompt: prompt,
+        messages: [{ role: 'user', content: 'Suggest drills based on the above context.' }],
+        maxTokens: 500,
+      })
+
+      const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+      const { drill_ids } = JSON.parse(cleaned)
+
+      if (Array.isArray(drill_ids) && drill_ids.length > 0) {
+        await updateSession(sess.id, { suggested_drills: drill_ids })
+        setSuggestedDrills(drill_ids)
+      }
+    } catch (err) {
+      if (__DEV__) console.error('Workout suggestion failed:', err)
+    }
+  }
 
   return {
-    session,
     phase,
-    feedback,
-    feedbackStreaming,
+    session,
+    interactions,
+    feedbackText,
+    feedbackLoading,
+    suggestedDrills,
     error,
-    deepDiveCount,
-    drillText,
-    drillResponse,
-    markExplanation,
-    qualitySignal,
-    sessionMode,
     startSession,
     submitResponse,
-    goDeeper,
-    submitDeepDive,
-    startMarking,
-    completeMark,
-    submitDrill,
-    skipDrill,
-    submitExplanation,
-    skipExplanation,
-    submitQuality,
-    retryFeedback,
+    diveDeeper,
+    tryAgain,
+    completeSession,
+    // Expose for checkpoint restoration
     setPhase,
     setSession,
-    restoreFromCheckpoint,
+    setInteractions,
+    setFeedbackText,
+    setSuggestedDrills,
   }
 }

@@ -1,3 +1,4 @@
+// app/(tabs)/index.tsx — Home screen (rebuilt)
 import { useState, useEffect, useCallback } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
@@ -5,35 +6,29 @@ import {
 import { useRouter } from 'expo-router'
 import { useAuth } from '../../src/hooks/useAuth'
 import { useStreak } from '../../src/hooks/useStreak'
-import { usePromptEngine } from '../../src/hooks/usePromptEngine'
-import { useWeaknessSRS } from '../../src/hooks/useWeaknessSRS'
-import { DEFAULT_PROMPTS } from '../../src/lib/prompts'
+import { DEFAULT_PROMPTS, PROMPT_SELECTION_SYSTEM_PROMPT } from '../../src/lib/prompts'
 import { getPersonalizedPrompts } from '../../src/lib/intakeMapping'
-import { getVoiceModel, getSessionCount, getTodaySession, getFocusMode, setFocusMode } from '../../src/lib/storage'
+import { getDrillById } from '../../src/lib/drills'
+import { callClaude } from '../../src/lib/claude'
+import {
+  getVoiceModel, getSessionCount, getTodaySession, getRecentSessions,
+  getFocusMode, setFocusMode,
+} from '../../src/lib/storage'
 import type { FocusMode } from '../../src/lib/storage'
-import { loadCheckpoint, clearCheckpoint, SESSION_KEY } from '../../src/lib/sessionCheckpoint'
 import { colors } from '../../src/lib/theme'
 
 export default function HomeScreen() {
   const router = useRouter()
   const { user } = useAuth()
   const { streak } = useStreak(user?.id)
-  const { weaknesses } = useWeaknessSRS(user?.id)
 
   const [sessionCount, setSessionCount] = useState(0)
   const [todaySession, setTodaySession] = useState<any>(null)
   const [voiceModel, setVoiceModel] = useState<any>(null)
+  const [suggestedDrills, setSuggestedDrills] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
-  const [checkpoint, setCheckpoint] = useState<any>(null)
   const [focusMode, setFocusModeState] = useState<FocusMode>('mixed')
-
-  const { selectPrompt } = usePromptEngine({
-    userId: user?.id,
-    voiceModel,
-    sessionCount,
-    weaknessSRS: weaknesses || [],
-  })
 
   useEffect(() => {
     if (!user?.id) return
@@ -41,14 +36,21 @@ export default function HomeScreen() {
       try {
         const count = await getSessionCount(user!.id)
         setSessionCount(count)
+
         const today = await getTodaySession(user!.id)
         setTodaySession(today)
+
         if (count >= 5) {
           const vm = await getVoiceModel(user!.id)
           setVoiceModel(vm)
         }
-        const cp = await loadCheckpoint(SESSION_KEY)
-        setCheckpoint(cp)
+
+        // Load suggested drills from most recent completed session
+        const recent = await getRecentSessions(user!.id, 1)
+        if (recent[0]?.suggested_drills) {
+          setSuggestedDrills(recent[0].suggested_drills)
+        }
+
         const fm = await getFocusMode()
         setFocusModeState(fm)
       } catch (err) {
@@ -66,34 +68,44 @@ export default function HomeScreen() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
-  const handleStartSession = useCallback(async (mode = 'daily') => {
-    if (mode === 'prep') {
-      router.push('/prep')
-      return
-    }
-
+  const handleStartSession = useCallback(async () => {
     setLoading(true)
     try {
-      let prompt: any
+      let prompt: { promptType: string; promptText: string } | null = null
 
+      // Early sessions: use personalized prompts from intake
       if (sessionCount < 5) {
         const intakeData = user?.user_metadata?.intake_answers
         if (intakeData) {
-          const personalizedSequence = getPersonalizedPrompts(intakeData)
-          const idx = Math.min(sessionCount, personalizedSequence.length - 1)
-          prompt = personalizedSequence[idx]
+          const sequence = getPersonalizedPrompts(intakeData)
+          const idx = Math.min(sessionCount, sequence.length - 1)
+          prompt = sequence[idx]
         } else {
-          const types = ['reveal', 'pressure', 'reveal', 'story']
-          const typeIndex = Math.min(sessionCount - 1, types.length - 1)
+          const types = ['reveal', 'pressure', 'reveal', 'story'] as const
+          const typeIndex = Math.min(sessionCount, types.length - 1)
           const type = types[typeIndex]
           const pool = DEFAULT_PROMPTS[type] || DEFAULT_PROMPTS.reveal
-          const text = pool[Math.floor(Math.random() * pool.length)]
-          prompt = { promptType: type, promptText: text }
+          prompt = { promptType: type, promptText: pool[Math.floor(Math.random() * pool.length)] }
         }
       } else {
-        prompt = await selectPrompt()
+        // Session 5+: use AI-driven prompt selection
+        try {
+          const result = await callClaude({
+            systemPrompt: PROMPT_SELECTION_SYSTEM_PROMPT,
+            messages: [{
+              role: 'user',
+              content: `Voice model:\n${JSON.stringify(voiceModel, null, 2)}\n\nSession count: ${sessionCount}\nFocus mode: ${focusMode}`,
+            }],
+            maxTokens: 500,
+          })
+          const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+          prompt = JSON.parse(cleaned)
+        } catch (err) {
+          if (__DEV__) console.error('AI prompt selection failed, using fallback:', err)
+        }
       }
 
+      // Fallback
       if (!prompt) {
         const pool = DEFAULT_PROMPTS.reveal
         prompt = { promptType: 'reveal', promptText: pool[Math.floor(Math.random() * pool.length)] }
@@ -109,38 +121,16 @@ export default function HomeScreen() {
         },
       })
     } catch (err) {
-      console.error('Failed to start session:', err)
+      if (__DEV__) console.error('Failed to start session:', err)
     } finally {
       setLoading(false)
     }
-  }, [sessionCount, user, selectPrompt, focusMode])
-
-  const handleResumeCheckpoint = useCallback(() => {
-    if (!checkpoint) return
-    router.push({
-      pathname: '/session',
-      params: {
-        promptType: checkpoint.promptType,
-        promptText: checkpoint.promptText,
-        sessionCount: String(sessionCount),
-        checkpointId: checkpoint.sessionId,
-      },
-    })
-  }, [checkpoint, sessionCount])
-
-  const handleDismissCheckpoint = useCallback(async () => {
-    await clearCheckpoint(SESSION_KEY)
-    setCheckpoint(null)
-  }, [])
+  }, [sessionCount, user, voiceModel, focusMode])
 
   const handleFocusMode = useCallback(async (mode: FocusMode) => {
     const prev = focusMode
     setFocusModeState(mode)
-    try {
-      await setFocusMode(mode)
-    } catch {
-      setFocusModeState(prev)
-    }
+    try { await setFocusMode(mode) } catch { setFocusModeState(prev) }
   }, [focusMode])
 
   if (pageLoading) {
@@ -152,7 +142,7 @@ export default function HomeScreen() {
   }
 
   // Already practiced today
-  if (todaySession?.completed) {
+  if (todaySession?.status === 'completed') {
     return (
       <View style={styles.container}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -164,16 +154,40 @@ export default function HomeScreen() {
           <View style={styles.centerContent}>
             <Text style={styles.doneText}>You practiced today.</Text>
 
-            <TouchableOpacity onPress={() => handleStartSession()}>
+            <TouchableOpacity onPress={handleStartSession}>
               <Text style={styles.practiceAgain}>Or practice again →</Text>
             </TouchableOpacity>
 
-            {todaySession.marked_moment && (
-              <Text style={styles.markedMoment}>"{todaySession.marked_moment}"</Text>
-            )}
+            <TouchableOpacity
+              style={styles.prepButton}
+              onPress={() => router.push('/prep')}
+            >
+              <Text style={styles.prepButtonText}>Prep for something →</Text>
+            </TouchableOpacity>
 
             <Text style={styles.comeBack}>Come back tomorrow.</Text>
           </View>
+
+          {/* Suggested drills from last session */}
+          {suggestedDrills.length > 0 && (
+            <View style={styles.suggestedSection}>
+              <Text style={styles.suggestedTitle}>SUGGESTED WORKOUTS</Text>
+              {suggestedDrills.map(drillId => {
+                const drill = getDrillById(drillId)
+                if (!drill) return null
+                return (
+                  <TouchableOpacity
+                    key={drill.id}
+                    style={styles.suggestedCard}
+                    onPress={() => router.push('/(tabs)/workouts')}
+                  >
+                    <Text style={styles.suggestedName}>{drill.name}</Text>
+                    <Text style={styles.suggestedMeta}>{drill.category}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          )}
         </ScrollView>
       </View>
     )
@@ -211,7 +225,7 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={[styles.startButton, loading && styles.startButtonDisabled]}
-            onPress={() => handleStartSession()}
+            onPress={handleStartSession}
             disabled={loading}
           >
             <Text style={styles.startButtonText}>
@@ -219,25 +233,32 @@ export default function HomeScreen() {
             </Text>
           </TouchableOpacity>
 
-          {sessionCount >= 5 && (
-            <TouchableOpacity onPress={() => handleStartSession('prep')} style={{ marginTop: 24 }}>
-              <Text style={styles.prepLink}>Prep for something →</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.prepButton}
+            onPress={() => router.push('/prep')}
+          >
+            <Text style={styles.prepButtonText}>Prep for something →</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Checkpoint recovery */}
-        {checkpoint && (
-          <View style={styles.checkpointCard}>
-            <TouchableOpacity onPress={handleResumeCheckpoint} style={styles.checkpointContent}>
-              <Text style={styles.checkpointTitle}>Interrupted session</Text>
-              <Text style={styles.checkpointPreview} numberOfLines={2}>
-                {checkpoint.promptText?.slice(0, 80)}{checkpoint.promptText?.length > 80 ? '...' : ''}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleDismissCheckpoint} style={styles.checkpointDismiss}>
-              <Text style={styles.checkpointDismissText}>✕</Text>
-            </TouchableOpacity>
+        {/* Suggested drills from last session */}
+        {suggestedDrills.length > 0 && (
+          <View style={styles.suggestedSection}>
+            <Text style={styles.suggestedTitle}>SUGGESTED WORKOUTS</Text>
+            {suggestedDrills.map(drillId => {
+              const drill = getDrillById(drillId)
+              if (!drill) return null
+              return (
+                <TouchableOpacity
+                  key={drill.id}
+                  style={styles.suggestedCard}
+                  onPress={() => router.push('/(tabs)/workouts')}
+                >
+                  <Text style={styles.suggestedName}>{drill.name}</Text>
+                  <Text style={styles.suggestedMeta}>{drill.category}</Text>
+                </TouchableOpacity>
+              )
+            })}
           </View>
         )}
       </ScrollView>
@@ -246,138 +267,31 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.paper,
-  },
-  center: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 120,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 80,
-  },
-  logo: {
-    fontSize: 14,
-    fontWeight: '500',
-    letterSpacing: 3,
-    color: colors.ink,
-  },
-  streakBadge: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.gold,
-  },
-  centerContent: {
-    alignItems: 'center',
-  },
-  greeting: {
-    fontSize: 20,
-    color: colors.ink,
-    marginBottom: 8,
-  },
-  readyText: {
-    fontSize: 20,
-    color: colors.ink,
-    marginBottom: 48,
-  },
-  focusRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 32,
-  },
-  focusChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: colors.paperDeep,
-  },
-  focusChipActive: {
-    backgroundColor: colors.ink,
-  },
-  focusChipText: {
-    fontSize: 13,
-    color: colors.inkGhost,
-  },
-  focusChipTextActive: {
-    color: colors.paper,
-  },
-  startButton: {
-    backgroundColor: colors.ink,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 40,
-    alignItems: 'center',
-  },
-  startButtonDisabled: {
-    backgroundColor: colors.paperDeep,
-  },
-  startButtonText: {
-    color: colors.paper,
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  prepLink: {
-    fontSize: 14,
-    color: colors.inkGhost,
-  },
-  doneText: {
-    fontSize: 16,
-    color: colors.ink,
-    marginBottom: 12,
-  },
-  practiceAgain: {
-    fontSize: 14,
-    color: colors.inkGhost,
-    marginBottom: 32,
-  },
-  markedMoment: {
-    fontSize: 18,
-    fontStyle: 'italic',
-    lineHeight: 28,
-    color: colors.gold,
-    textAlign: 'center',
-    marginBottom: 24,
-    paddingHorizontal: 16,
-  },
-  comeBack: {
-    fontSize: 16,
-    color: colors.inkMuted,
-  },
-  checkpointCard: {
-    marginTop: 40,
-    backgroundColor: colors.paperDeep,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  checkpointContent: {
-    flex: 1,
-    padding: 16,
-  },
-  checkpointTitle: {
-    fontSize: 14,
-    color: colors.inkMuted,
-    marginBottom: 4,
-  },
-  checkpointPreview: {
-    fontSize: 14,
-    color: colors.inkGhost,
-    lineHeight: 20,
-  },
-  checkpointDismiss: {
-    padding: 12,
-  },
-  checkpointDismissText: {
-    fontSize: 12,
-    color: colors.inkGhost,
-  },
+  container: { flex: 1, backgroundColor: colors.paper },
+  center: { justifyContent: 'center', alignItems: 'center' },
+  scrollContent: { paddingHorizontal: 24, paddingTop: 60, paddingBottom: 120 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 80 },
+  logo: { fontSize: 14, fontWeight: '500', letterSpacing: 3, color: colors.ink },
+  streakBadge: { fontSize: 13, fontWeight: '500', color: colors.gold },
+  centerContent: { alignItems: 'center' },
+  greeting: { fontSize: 20, color: colors.ink, marginBottom: 8 },
+  readyText: { fontSize: 20, color: colors.ink, marginBottom: 48 },
+  focusRow: { flexDirection: 'row', gap: 8, marginBottom: 32 },
+  focusChip: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 16, backgroundColor: colors.paperDeep },
+  focusChipActive: { backgroundColor: colors.ink },
+  focusChipText: { fontSize: 13, color: colors.inkGhost },
+  focusChipTextActive: { color: colors.paper },
+  startButton: { backgroundColor: colors.ink, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 40, alignItems: 'center' },
+  startButtonDisabled: { backgroundColor: colors.paperDeep },
+  startButtonText: { color: colors.paper, fontSize: 15, fontWeight: '500' },
+  prepButton: { marginTop: 16, paddingVertical: 10, alignItems: 'center' as const },
+  prepButtonText: { fontSize: 14, color: colors.inkGhost },
+  doneText: { fontSize: 16, color: colors.ink, marginBottom: 12 },
+  practiceAgain: { fontSize: 14, color: colors.inkGhost, marginBottom: 32 },
+  comeBack: { fontSize: 16, color: colors.inkMuted },
+  suggestedSection: { marginTop: 40 },
+  suggestedTitle: { fontSize: 11, fontWeight: '600', letterSpacing: 0.5, color: colors.inkGhost, marginBottom: 12 },
+  suggestedCard: { backgroundColor: colors.paperDim, padding: 16, borderRadius: 12, marginBottom: 8 },
+  suggestedName: { fontSize: 15, fontWeight: '500', color: colors.ink },
+  suggestedMeta: { fontSize: 13, color: colors.inkMuted, marginTop: 4 },
 })

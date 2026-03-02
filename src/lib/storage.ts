@@ -1,13 +1,20 @@
+// src/lib/storage.ts — Data layer for CRISP (rebuilt for chat-log schema)
+
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
-import { validateVoiceModel } from './voiceModelValidation'
+import type { Session, Interaction, Pattern } from '../types/session'
 
 function localDateString(): string {
   return new Intl.DateTimeFormat('en-CA').format(new Date())
 }
 
-// Sessions
-export async function createSession({ userId, promptType, promptText, responseMode = 'text', sessionMode = 'daily', sessionNumber = null }: { userId: string; promptType: string; promptText: string; responseMode?: string; sessionMode?: string; sessionNumber?: number | null }) {
+// ── Sessions ────────────────────────────────────
+
+export async function createSession({
+  userId, promptType, promptText, responseMode = 'text',
+}: {
+  userId: string; promptType: string; promptText: string; responseMode?: 'text' | 'voice'
+}): Promise<Session> {
   const { data, error } = await supabase
     .from('sessions')
     .insert({
@@ -15,63 +22,35 @@ export async function createSession({ userId, promptType, promptText, responseMo
       prompt_type: promptType,
       prompt_text: promptText,
       response_mode: responseMode,
-      session_mode: sessionMode,
-      session_number: sessionNumber,
-      completed: false,
+      status: 'active',
     })
     .select()
     .single()
 
   if (error) throw error
-  return data
-}
-
-export async function getSession(sessionId: string) {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select()
-    .eq('id', sessionId)
-    .single()
-  if (error) throw error
-  return data
+  return data as Session
 }
 
 export async function updateSession(sessionId: string, updates: Record<string, unknown>) {
-  const columnMap: Record<string, string> = {
-    responseText: 'response_text',
-    feedbackEcho: 'feedback_echo',
-    feedbackName: 'feedback_name',
-    feedbackOpen: 'feedback_open',
-    markedMoment: 'marked_moment',
-    frameworkUsed: 'framework_used',
-    durationSeconds: 'duration_seconds',
-    feedbackDrill: 'feedback_drill',
-    drillResponse: 'drill_response',
-    drillSkipped: 'drill_skipped',
-    deepDiveExchanges: 'deep_dive_exchanges',
-    markExplanation: 'mark_explanation',
-    weaknessTargeted: 'weakness_targeted',
-    qualitySignal: 'quality_signal',
-    sessionNumber: 'session_number',
-    sessionMode: 'session_mode',
-    secondaryCapture: 'secondary_capture',
-  }
-
-  const mapped: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(updates)) {
-    const col = columnMap[key] || key
-    mapped[col] = value
-  }
-
   const { error } = await supabase
     .from('sessions')
-    .update(mapped)
+    .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', sessionId)
 
   if (error) throw error
 }
 
-export async function getRecentSessions(userId: string, limit = 10) {
+export async function getSession(sessionId: string): Promise<Session> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .single()
+  if (error) throw error
+  return data as Session
+}
+
+export async function getRecentSessions(userId: string, limit = 10): Promise<Session[]> {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
@@ -80,10 +59,10 @@ export async function getRecentSessions(userId: string, limit = 10) {
     .limit(limit)
 
   if (error) throw error
-  return data
+  return (data || []) as Session[]
 }
 
-export async function getTodaySession(userId: string) {
+export async function getTodaySession(userId: string): Promise<Session | null> {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
@@ -96,34 +75,144 @@ export async function getTodaySession(userId: string) {
     .limit(1)
 
   if (error) throw error
-  return data?.[0] || null
+  return (data?.[0] as Session) || null
 }
 
-export async function getIncompleteSession(userId: string) {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('completed', false)
-    .order('created_at', { ascending: false })
-    .limit(1)
-
-  if (error) throw error
-  return data?.[0] || null
-}
-
-export async function getSessionCount(userId: string) {
+export async function getSessionCount(userId: string): Promise<number> {
   const { count, error } = await supabase
     .from('sessions')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId)
-    .eq('completed', true)
+    .eq('status', 'completed')
 
   if (error) throw error
   return count || 0
 }
 
-// Voice Model
+// ── Interactions (Chat Log) ─────────────────────
+
+export async function addInteraction({
+  sessionId, userId, role, content, interactionType, audioUrl = null,
+}: {
+  sessionId: string
+  userId: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  interactionType: Interaction['interaction_type']
+  audioUrl?: string | null
+}): Promise<Interaction> {
+  const { data, error } = await supabase
+    .from('interactions')
+    .insert({
+      session_id: sessionId,
+      user_id: userId,
+      role,
+      content,
+      interaction_type: interactionType,
+      audio_url: audioUrl,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data as Interaction
+}
+
+export async function getSessionInteractions(sessionId: string): Promise<Interaction[]> {
+  const { data, error } = await supabase
+    .from('interactions')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  return (data || []) as Interaction[]
+}
+
+export async function getRecentInteractions(userId: string, limit = 50): Promise<Interaction[]> {
+  const { data, error } = await supabase
+    .from('interactions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data || []) as Interaction[]
+}
+
+// ── Patterns ────────────────────────────────────
+
+export async function upsertPattern(
+  userId: string,
+  pattern: { pattern_type: string; pattern_id: string; description: string; evidence_excerpt: string },
+  sessionId: string,
+) {
+  const evidence = { session_id: sessionId, excerpt: pattern.evidence_excerpt, date: new Date().toISOString() }
+
+  // Check if pattern already exists
+  const { data: existing } = await supabase
+    .from('patterns')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('pattern_id', pattern.pattern_id)
+    .maybeSingle()
+
+  if (existing) {
+    const updatedEvidence = [...(existing.evidence || []), evidence].slice(-10) // keep last 10
+    const { error } = await supabase
+      .from('patterns')
+      .update({
+        description: pattern.description,
+        evidence: updatedEvidence,
+        last_seen_at: new Date().toISOString(),
+        status: 'active',
+      })
+      .eq('id', existing.id)
+    if (error) throw error
+  } else {
+    const { error } = await supabase
+      .from('patterns')
+      .insert({
+        user_id: userId,
+        pattern_type: pattern.pattern_type,
+        pattern_id: pattern.pattern_id,
+        description: pattern.description,
+        evidence: [evidence],
+      })
+    if (error) throw error
+  }
+}
+
+export async function getPatterns(userId: string): Promise<Pattern[]> {
+  const { data, error } = await supabase
+    .from('patterns')
+    .select('*')
+    .eq('user_id', userId)
+    .order('last_seen_at', { ascending: false })
+
+  if (error) throw error
+  return (data || []) as Pattern[]
+}
+
+// ── Audio Upload ────────────────────────────────
+
+export async function uploadAudio(userId: string, audioUri: string): Promise<string> {
+  const filename = `${userId}/${Date.now()}.m4a`
+  const response = await fetch(audioUri)
+  const blob = await response.blob()
+
+  const { error } = await supabase.storage
+    .from('audio')
+    .upload(filename, blob, { contentType: 'audio/m4a' })
+  if (error) throw error
+
+  const { data } = supabase.storage.from('audio').getPublicUrl(filename)
+  return data.publicUrl
+}
+
+// ── Voice Model ─────────────────────────────────
+
 export async function getVoiceModel(userId: string) {
   const { data, error } = await supabase
     .from('voice_models')
@@ -136,12 +225,6 @@ export async function getVoiceModel(userId: string) {
 }
 
 export async function upsertVoiceModel(userId: string, model: Record<string, unknown>, sessionCount: number) {
-  const { valid, errors } = validateVoiceModel(model)
-  if (!valid) {
-    console.error('Voice model validation failed, keeping existing model:', errors)
-    return
-  }
-
   const { error } = await supabase
     .from('voice_models')
     .upsert({
@@ -154,17 +237,20 @@ export async function upsertVoiceModel(userId: string, model: Record<string, unk
   if (error) throw error
 }
 
-// Library
-export async function addToLibrary({ userId, sessionId, markedText, promptText, aiObservation, promptType, markExplanation = null, secondaryCapture = null, sessionNumber = null, source = 'session' }: { userId: string; sessionId?: string; markedText: string; promptText: string; aiObservation: string; promptType: string; markExplanation?: string | null; secondaryCapture?: string | null; sessionNumber?: number | null; source?: 'session' | 'manual' }) {
+// ── Library ─────────────────────────────────────
+
+export async function addToLibrary({
+  userId, sessionId, markedText, promptText, aiObservation, promptType, source = 'session',
+}: {
+  userId: string; sessionId?: string; markedText: string; promptText: string
+  aiObservation: string; promptType: string; source?: 'session' | 'manual'
+}) {
   const row: Record<string, unknown> = {
     user_id: userId,
     marked_text: markedText,
     prompt_text: promptText,
     ai_observation: aiObservation,
     prompt_type: promptType,
-    mark_explanation: markExplanation,
-    secondary_capture: secondaryCapture,
-    session_number: sessionNumber,
     source,
   }
   if (sessionId) row.session_id = sessionId
@@ -192,8 +278,6 @@ export async function toggleLibraryPin(entryId: string, userId: string, pinned: 
 export async function updateLibraryEntry(entryId: string, userId: string, updates: Record<string, unknown>) {
   const columnMap: Record<string, string> = {
     markedText: 'marked_text',
-    markExplanation: 'mark_explanation',
-    secondaryCapture: 'secondary_capture',
   }
 
   const mapped: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -233,22 +317,6 @@ export async function getLibrary(userId: string) {
 }
 
 export async function getLibraryFiltered(userId: string, filter = 'all') {
-  if (filter === 'all') {
-    return getLibrary(userId)
-  }
-
-  if (filter === 'breakthroughs') {
-    const { data, error } = await supabase
-      .from('library')
-      .select('*, sessions!inner(quality_signal)')
-      .eq('user_id', userId)
-      .eq('sessions.quality_signal', 'breakthrough')
-      .order('created_at', { ascending: false })
-
-    if (error) throw error
-    return data || []
-  }
-
   if (filter === 'pinned') {
     const { data, error } = await supabase
       .from('library')
@@ -261,22 +329,11 @@ export async function getLibraryFiltered(userId: string, filter = 'all') {
     return data || []
   }
 
-  if (filter === 'prep') {
-    const { data, error } = await supabase
-      .from('library')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('prompt_type', 'prep')
-      .order('created_at', { ascending: false })
-
-    if (error) throw error
-    return data || []
-  }
-
   return getLibrary(userId)
 }
 
-// Streaks
+// ── Streaks ─────────────────────────────────────
+
 export async function getStreak(userId: string) {
   const { data, error } = await supabase
     .from('streaks')
@@ -292,9 +349,7 @@ export async function updateStreak(userId: string) {
   const streak = await getStreak(userId)
   const today = localDateString()
 
-  if (streak.last_practiced_date === today) {
-    return streak
-  }
+  if (streak.last_practiced_date === today) return streak
 
   const yesterday = new Date()
   yesterday.setDate(yesterday.getDate() - 1)
@@ -304,7 +359,6 @@ export async function updateStreak(userId: string) {
   if (streak.last_practiced_date === yesterdayStr) {
     newStreak += 1
   } else if (streak.last_practiced_date) {
-    // Missed a day — check for freeze
     const daysBetween = Math.floor(
       (new Date(today).getTime() - new Date(streak.last_practiced_date).getTime()) / (1000 * 60 * 60 * 24)
     )
@@ -336,126 +390,6 @@ export async function updateStreak(userId: string) {
   return data
 }
 
-// Weakness SRS
-export async function getWeaknessSRS(userId: string) {
-  const { data, error } = await supabase
-    .from('weakness_srs')
-    .select('*')
-    .eq('user_id', userId)
-
-  if (error) throw error
-  return data || []
-}
-
-export async function upsertWeaknessSRS(userId: string, weaknessId: string, updates: Record<string, unknown>) {
-  const { error } = await supabase
-    .from('weakness_srs')
-    .upsert({
-      user_id: userId,
-      weakness_id: weaknessId,
-      ...updates,
-    })
-
-  if (error) throw error
-}
-
-export async function getActiveWeaknesses(userId: string) {
-  const { data, error } = await supabase
-    .from('weakness_srs')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-
-  if (error) throw error
-  return data || []
-}
-
-// Prep Sessions
-export async function createPrepSession({ userId, situationType, situationDescription }: { userId: string; situationType: string; situationDescription: string }) {
-  const { data, error } = await supabase
-    .from('prep_sessions')
-    .insert({
-      user_id: userId,
-      situation_type: situationType,
-      situation_description: situationDescription,
-      completed: false,
-    })
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-export async function updatePrepSession(prepId: string, updates: Record<string, unknown>) {
-  const columnMap: Record<string, string> = {
-    prepExchanges: 'prep_exchanges',
-    keyMessages: 'key_messages',
-    situationType: 'situation_type',
-    situationDescription: 'situation_description',
-  }
-
-  const mapped: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(updates)) {
-    const col = columnMap[key] || key
-    mapped[col] = value
-  }
-
-  const { error } = await supabase
-    .from('prep_sessions')
-    .update(mapped)
-    .eq('id', prepId)
-
-  if (error) throw error
-}
-
-export async function getPrepSessions(userId: string, limit = 10) {
-  const { data, error } = await supabase
-    .from('prep_sessions')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(limit)
-
-  if (error) throw error
-  return data || []
-}
-
-export async function getPrepSession(prepId: string) {
-  const { data, error } = await supabase
-    .from('prep_sessions')
-    .select('*')
-    .eq('id', prepId)
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-// Notification Log
-export async function logNotification({ userId, promptText }: { userId: string; promptText: string }) {
-  const { error } = await supabase
-    .from('notification_log')
-    .insert({
-      user_id: userId,
-      prompt_text: promptText,
-    })
-
-  if (error) throw error
-}
-
-export async function getRecentNotifications(userId: string, limit = 10) {
-  const { data, error } = await supabase
-    .from('notification_log')
-    .select('*')
-    .eq('user_id', userId)
-    .order('sent_at', { ascending: false })
-    .limit(limit)
-
-  if (error) throw error
-  return data || []
-}
-
 // ── Focus Mode ──────────────────────────────────
 
 const FOCUS_MODE_KEY = 'crisp_focus_mode'
@@ -485,7 +419,7 @@ export async function saveIntakeAnswers(answers: Record<string, string>) {
   if (error) throw error
 }
 
-// ── Workout Library ──────────────────────────────
+// ── Workout Library ─────────────────────────────
 
 const TODAY_WORKOUT_KEY = 'crisp_today_workout'
 
@@ -506,7 +440,12 @@ export async function loadTodayWorkout() {
   }
 }
 
-export async function createWorkoutSession({ userId, drillId, drillName, category, difficulty, durationSeconds, notes = null }: { userId: string; drillId: string; drillName: string; category: string; difficulty: string; durationSeconds: number; notes?: string | null }) {
+export async function createWorkoutSession({
+  userId, drillId, drillName, category, difficulty, durationSeconds, notes = null,
+}: {
+  userId: string; drillId: string; drillName: string; category: string
+  difficulty: string; durationSeconds: number; notes?: string | null
+}) {
   const { data, error } = await supabase
     .from('workout_sessions')
     .insert({

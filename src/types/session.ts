@@ -1,24 +1,40 @@
-// src/types/session.ts
+// src/types/session.ts — Rebuilt for simplified session flow
 
-export interface Prompt {
-  promptType: string
-  promptText: string
-}
+export type SessionPhase = 'prompt' | 'responding' | 'feedback' | 'done'
 
-export interface Message {
-  role: 'user' | 'assistant'
+export interface Interaction {
+  id: string
+  session_id: string
+  user_id: string
+  role: 'user' | 'assistant' | 'system'
   content: string
+  interaction_type: 'response' | 'dive_deeper' | 'feedback' | 'follow_up' | 'fix_attempt'
+  audio_url: string | null
+  created_at: string
 }
 
 export interface Session {
   id: string
   user_id: string
-  prompt_type: string
   prompt_text: string
-  response_text: string | null
-  completed: boolean
+  prompt_type: string
+  response_mode: 'text' | 'voice'
+  status: 'active' | 'completed'
+  suggested_drills: string[] | null
   created_at: string
-  [key: string]: unknown
+  updated_at: string
+}
+
+export interface Pattern {
+  id: string
+  user_id: string
+  pattern_type: 'strength' | 'weakness'
+  pattern_id: string
+  description: string
+  evidence: Array<{ session_id: string; excerpt: string; date: string }>
+  first_detected_at: string
+  last_seen_at: string
+  status: 'active' | 'resolved'
 }
 
 export interface Checkpoint {
@@ -26,65 +42,6 @@ export interface Checkpoint {
   phase: SessionPhase
   promptType: string
   promptText: string
-  feedback: string
-  conversationHistory: Message[]
-  drillText: string | null
-  drillResponse: string
-  deepDiveCount: number
-  sessionMode: string
-  responseText?: string
-  markedText?: string
-  markExplanation?: string
-}
-
-export type SessionPhase =
-  | 'idle'
-  | 'responding'
-  | 'thinking'
-  | 'feedback'
-  | 'marking'
-  | 'explaining'
-  | 'drilling'
-  | 'quality'
-  | 'closed'
-
-export type SessionAction =
-  | { type: 'START'; prompt: Prompt; session: Session }
-  | { type: 'SUBMIT_RESPONSE'; text: string }
-  | { type: 'FEEDBACK_CHUNK'; text: string }
-  | { type: 'FEEDBACK_DONE'; fullText: string; drillText: string | null; conversationHistory: Message[] }
-  | { type: 'FEEDBACK_ERROR'; error: string }
-  | { type: 'GO_DEEPER'; question: string }
-  | { type: 'DONE_FEEDBACK' }
-  | { type: 'COMPLETE_MARK'; text: string }
-  | { type: 'SKIP_MARK' }
-  | { type: 'SUBMIT_DRILL'; response: string }
-  | { type: 'SKIP_DRILL' }
-  | { type: 'SUBMIT_EXPLANATION'; text: string }
-  | { type: 'SKIP_EXPLANATION' }
-  | { type: 'SUBMIT_QUALITY'; signal: string }
-  | { type: 'RETRY' }
-  | { type: 'RESTORE_CHECKPOINT'; checkpoint: Checkpoint }
-  | { type: 'SET_SESSION'; session: Session }
-  | { type: 'SET_ERROR'; error: string }
-
-export interface SessionState {
-  phase: SessionPhase
-  session: Session | null
-  prompt: Prompt | null
-  responseText: string
-  lastResponseText: string
-  feedback: string
-  feedbackStreaming: boolean
-  conversationHistory: Message[]
-  deepDiveCount: number
-  openQuestion: string | null
-  drillText: string | null
-  drillResponse: string
-  markedMoment: string
-  markExplanation: string
-  qualitySignal: string | null
-  error: string | null
-  sessionMode: 'daily' | 'quickrep' | 'prep'
-  startTime: number | null
+  interactions: Interaction[]
+  feedbackText: string
 }
