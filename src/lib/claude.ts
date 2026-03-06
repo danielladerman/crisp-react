@@ -1,6 +1,8 @@
 import { supabase } from './supabase'
 
-const API_BASE = process.env.EXPO_PUBLIC_API_URL!
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!
+const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/claude-proxy`
 
 async function getJwt() {
   const { data: { session } } = await supabase.auth.getSession()
@@ -17,11 +19,12 @@ async function proxyFetch(body: Record<string, unknown>, retried = false): Promi
 
   let response: Response
   try {
-    response = await fetch(`${API_BASE}/api/claude`, {
+    response = await fetch(FUNCTION_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
+        'apikey': SUPABASE_ANON_KEY,
       },
       body: JSON.stringify(body),
       signal: controller.signal,

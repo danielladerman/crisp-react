@@ -19,7 +19,6 @@
     "expo-router": "~55.0.3",
     "expo-secure-store": "~55.0.8",
     "expo-status-bar": "~55.0.4",
-    "jose": "^6.2.0",
     "react": "19.2.0",
     "react-native": "0.83.2",
     "react-native-gesture-handler": "~2.30.0",
@@ -30,7 +29,6 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "@vercel/node": "^5.6.11",
     "typescript": "~5.9.2"
   },
   "private": true
