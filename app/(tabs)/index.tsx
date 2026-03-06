@@ -130,7 +130,7 @@ export default function HomeScreen() {
   const handleFocusMode = useCallback(async (mode: FocusMode) => {
     const prev = focusMode
     setFocusModeState(mode)
-    try { await setFocusMode(mode) } catch { setFocusModeState(prev) }
+    try { await setFocusMode(mode) } catch (err) { if (__DEV__) console.error('Focus mode save failed:', err); setFocusModeState(prev) }
   }, [focusMode])
 
   if (pageLoading) {
@@ -154,8 +154,10 @@ export default function HomeScreen() {
           <View style={styles.centerContent}>
             <Text style={styles.doneText}>You practiced today.</Text>
 
-            <TouchableOpacity onPress={handleStartSession}>
-              <Text style={styles.practiceAgain}>Or practice again →</Text>
+            <TouchableOpacity onPress={handleStartSession} disabled={loading}>
+              <Text style={[styles.practiceAgain, loading && { opacity: 0.5 }]}>
+                {loading ? 'Preparing...' : 'Or practice again →'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity

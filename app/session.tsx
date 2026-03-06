@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView,
-  StyleSheet, Modal, KeyboardAvoidingView, Platform,
+  StyleSheet, Modal, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -13,7 +13,8 @@ import { usePatterns } from '../src/hooks/usePatterns'
 import { useVoiceRecorder } from '../src/hooks/useVoiceRecorder'
 import { useTranscription } from '../src/hooks/useTranscription'
 import { ScreenContainer, Button, Card, ErrorBoundary } from '../src/components/ui'
-import { getVoiceModel, upsertVoiceModel, updateStreak } from '../src/lib/storage'
+import { getVoiceModel, upsertVoiceModel, updateStreak, getSession as fetchSession, getSessionInteractions } from '../src/lib/storage'
+import { loadCheckpoint, clearCheckpoint, SESSION_KEY } from '../src/lib/sessionCheckpoint'
 import { mapAnswersToVoiceModel } from '../src/lib/intakeMapping'
 import { getDrillById } from '../src/lib/drills'
 import { colors, spacing } from '../src/lib/theme'
@@ -43,6 +44,7 @@ export default function SessionScreen() {
     phase, session, interactions, feedbackText, feedbackLoading,
     suggestedDrills, error,
     startSession, submitResponse, diveDeeper, tryAgain, completeSession,
+    setPhase, setSession, setInteractions, setFeedbackText,
   } = useSession({ userId: user?.id || '', sessionCount, voiceModel, patterns, focusMode })
 
   // Local state for text input
@@ -70,12 +72,33 @@ export default function SessionScreen() {
     return () => { cancelled = true }
   }, [user?.id, sessionCount])
 
-  // Auto-start session on mount
+  // Auto-start session on mount (or restore from checkpoint)
   const startedRef = useRef(false)
   useEffect(() => {
     if (startedRef.current || !user?.id) return
     startedRef.current = true
-    startSession(params.promptType || 'reveal', params.promptText || '')
+
+    loadCheckpoint(SESSION_KEY).then(async (cp) => {
+      if (cp?.sessionId) {
+        try {
+          const [restored, ints] = await Promise.all([
+            fetchSession(cp.sessionId),
+            getSessionInteractions(cp.sessionId),
+          ])
+          if (restored && restored.status !== 'completed') {
+            setSession(restored)
+            setInteractions(ints)
+            if (cp.feedbackText) setFeedbackText(cp.feedbackText)
+            setPhase(cp.phase || 'responding')
+            return
+          }
+        } catch (err) {
+          if (__DEV__) console.error('Checkpoint restore failed:', err)
+          clearCheckpoint(SESSION_KEY)
+        }
+      }
+      startSession(params.promptType || 'reveal', params.promptText || '')
+    })
   }, [user?.id])
 
   // Handle voice recording stop → transcription
@@ -107,7 +130,7 @@ export default function SessionScreen() {
   // Handle done → update streak, show drills popup
   const handleDone = useCallback(async () => {
     if (user?.id) {
-      try { await updateStreak(user.id) } catch {}
+      try { await updateStreak(user.id) } catch (err) { if (__DEV__) console.error('Streak update failed:', err) }
     }
     await completeSession()
     if (suggestedDrills && suggestedDrills.length > 0) {
@@ -121,6 +144,18 @@ export default function SessionScreen() {
     setShowDrillsModal(false)
     router.back()
   }, [])
+
+  const handleExit = useCallback(() => {
+    if (phase === 'done') { router.back(); return }
+    Alert.alert(
+      'Leave session?',
+      'Your responses are saved. You can start a new session anytime.',
+      [
+        { text: 'Stay', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: () => router.back() },
+      ],
+    )
+  }, [phase])
 
   // Format recording duration
   const formatDuration = (secs: number) => {
@@ -139,6 +174,10 @@ export default function SessionScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <ScreenContainer scroll>
+            <TouchableOpacity style={styles.closeButton} onPress={handleExit}>
+              <Ionicons name="close" size={24} color={colors.inkMuted} />
+            </TouchableOpacity>
+
             {/* Prompt */}
             <Text style={styles.prompt}>
               {session?.prompt_text || params.promptText}
@@ -248,6 +287,10 @@ export default function SessionScreen() {
     return (
       <ErrorBoundary fallbackMessage="Something went wrong.">
         <ScreenContainer scroll>
+          <TouchableOpacity style={styles.closeButton} onPress={handleExit}>
+            <Ionicons name="close" size={24} color={colors.inkMuted} />
+          </TouchableOpacity>
+
           <Text style={styles.prompt}>
             {session?.prompt_text || params.promptText}
           </Text>
@@ -345,6 +388,11 @@ export default function SessionScreen() {
 }
 
 const styles = StyleSheet.create({
+  closeButton: {
+    alignSelf: 'flex-end',
+    padding: 4,
+    marginBottom: 8,
+  },
   prompt: {
     fontSize: 18,
     fontStyle: 'italic',

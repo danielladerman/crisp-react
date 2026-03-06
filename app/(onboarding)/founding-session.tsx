@@ -59,7 +59,7 @@ export default function FoundingSessionScreen() {
   }, [inputText, diveDeeper])
 
   const handleDone = useCallback(async () => {
-    try { await updateStreak(user?.id) } catch {}
+    try { await updateStreak(user?.id) } catch (err) { if (__DEV__) console.error('Streak update failed:', err) }
 
     // Seed voice model from intake answers
     try {

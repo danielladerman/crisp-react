@@ -58,7 +58,7 @@ export default function PrepScreen() {
       try {
         const vm = await getVoiceModel(user.id)
         if (vm) prompt += `\n\nVOICE MODEL:\n${JSON.stringify(vm, null, 2)}`
-      } catch {}
+      } catch (err) { if (__DEV__) console.error('Voice model load failed:', err) }
     }
 
     if (patterns && patterns.length > 0) {
@@ -201,7 +201,7 @@ export default function PrepScreen() {
 
     try {
       await updateSession(session.id, { status: 'completed' })
-      try { await updateStreak(user.id) } catch {}
+      try { await updateStreak(user.id) } catch (err) { if (__DEV__) console.error('Streak update failed:', err) }
     } catch (err) {
       if (__DEV__) console.error('Failed to complete prep session:', err)
     }

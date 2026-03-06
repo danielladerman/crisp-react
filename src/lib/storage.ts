@@ -221,7 +221,7 @@ export async function getVoiceModel(userId: string) {
     .single()
 
   if (error && error.code !== 'PGRST116') throw error
-  return data?.model || null
+  return data?.model_data || null
 }
 
 export async function upsertVoiceModel(userId: string, model: Record<string, unknown>, sessionCount: number) {
@@ -231,7 +231,7 @@ export async function upsertVoiceModel(userId: string, model: Record<string, unk
       user_id: userId,
       updated_at: new Date().toISOString(),
       session_count: sessionCount,
-      model,
+      model_data: model,
     })
 
   if (error) throw error
@@ -342,25 +342,25 @@ export async function getStreak(userId: string) {
     .single()
 
   if (error && error.code !== 'PGRST116') throw error
-  return data || { current_streak: 0, longest_streak: 0, last_practiced_date: null, freeze_count: 2 }
+  return data || { current_streak: 0, longest_streak: 0, last_practice_date: null, freeze_count: 2 }
 }
 
 export async function updateStreak(userId: string) {
   const streak = await getStreak(userId)
   const today = localDateString()
 
-  if (streak.last_practiced_date === today) return streak
+  if (streak.last_practice_date === today) return streak
 
   const yesterday = new Date()
   yesterday.setDate(yesterday.getDate() - 1)
   const yesterdayStr = new Intl.DateTimeFormat('en-CA').format(yesterday)
 
   let newStreak = streak.current_streak
-  if (streak.last_practiced_date === yesterdayStr) {
+  if (streak.last_practice_date === yesterdayStr) {
     newStreak += 1
-  } else if (streak.last_practiced_date) {
+  } else if (streak.last_practice_date) {
     const daysBetween = Math.floor(
-      (new Date(today).getTime() - new Date(streak.last_practiced_date).getTime()) / (1000 * 60 * 60 * 24)
+      (new Date(today).getTime() - new Date(streak.last_practice_date).getTime()) / (1000 * 60 * 60 * 24)
     )
     if (daysBetween <= 2 && streak.freeze_count > 0) {
       newStreak += 1
@@ -380,7 +380,7 @@ export async function updateStreak(userId: string) {
       user_id: userId,
       current_streak: newStreak,
       longest_streak: longestStreak,
-      last_practiced_date: today,
+      last_practice_date: today,
       freeze_count: streak.freeze_count,
     })
     .select()
@@ -399,8 +399,8 @@ export async function getFocusMode(): Promise<FocusMode> {
   try {
     const val = await AsyncStorage.getItem(FOCUS_MODE_KEY)
     if (val === 'professional' || val === 'relational' || val === 'mixed') return val
-  } catch {
-    // fall through
+  } catch (err) {
+    if (__DEV__) console.error('getFocusMode failed:', err)
   }
   return 'mixed'
 }
@@ -435,7 +435,8 @@ export async function loadTodayWorkout() {
     const { drillName, date } = JSON.parse(raw)
     const today = localDateString()
     return date === today ? { drill_name: drillName } : null
-  } catch {
+  } catch (err) {
+    if (__DEV__) console.error('loadTodayWorkout failed:', err)
     return null
   }
 }
