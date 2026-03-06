@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useAuth } from '../../src/hooks/useAuth'
 import { colors } from '../../src/lib/theme'
@@ -19,7 +20,7 @@ export default function WelcomeScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
         <Text style={styles.title}>Welcome to CRISP.</Text>
         <Text style={styles.body}>
@@ -41,7 +42,7 @@ export default function WelcomeScreen() {
           <Text style={styles.buttonText}>Continue</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   )
 }
 

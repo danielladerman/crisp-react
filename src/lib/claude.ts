@@ -8,16 +8,30 @@ async function getJwt() {
   return session.access_token
 }
 
+const REQUEST_TIMEOUT_MS = 45_000 // 45 second timeout for API calls
+
 async function proxyFetch(body: Record<string, unknown>, retried = false): Promise<Response> {
   const token = await getJwt()
-  const response = await fetch(`${API_BASE}/api/claude`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}/api/claude`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (err: any) {
+    clearTimeout(timeout)
+    if (err.name === 'AbortError') throw new Error('Request timed out. Please try again.')
+    throw err
+  }
+  clearTimeout(timeout)
 
   if (response.status === 401 && !retried) {
     await supabase.auth.refreshSession()

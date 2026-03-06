@@ -1,4 +1,5 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
+import { Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { colors } from '../../src/lib/theme'
 
@@ -6,7 +7,8 @@ export default function PhilosophyScreen() {
   const router = useRouter()
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.title}>The philosophy.</Text>
 
       <Text style={styles.body}>
@@ -29,6 +31,7 @@ export default function PhilosophyScreen() {
         <Text style={styles.buttonText}>I'm in</Text>
       </TouchableOpacity>
     </ScrollView>
+    </SafeAreaView>
   )
 }
 
@@ -39,7 +42,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 32,
-    paddingTop: 80,
+    paddingTop: 24,
     paddingBottom: 48,
   },
   title: {

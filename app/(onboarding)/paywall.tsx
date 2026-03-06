@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useSubscription } from '../../src/hooks/useSubscription'
 import { useAuth } from '../../src/hooks/useAuth'
@@ -47,7 +48,8 @@ export default function PaywallScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.title}>Continue with CRISP</Text>
 
       <Text style={styles.body}>
@@ -91,6 +93,7 @@ export default function PaywallScreen() {
         the end of the current period.
       </Text>
     </ScrollView>
+    </SafeAreaView>
   )
 }
 
@@ -101,7 +104,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 32,
-    paddingTop: 80,
+    paddingTop: 24,
     paddingBottom: 48,
   },
   title: {

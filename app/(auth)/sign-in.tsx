@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../../src/hooks/useAuth'
 import { colors } from '../../src/lib/theme'
 
@@ -40,8 +41,9 @@ export default function SignInScreen() {
   }
 
   return (
+    <SafeAreaView style={styles.container} edges={['top']}>
     <KeyboardAvoidingView
-      style={styles.container}
+      style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.inner}>
@@ -104,6 +106,7 @@ export default function SignInScreen() {
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   )
 }
 

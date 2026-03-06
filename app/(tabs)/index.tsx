@@ -2,10 +2,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
+  RefreshControl,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useAuth } from '../../src/hooks/useAuth'
 import { useStreak } from '../../src/hooks/useStreak'
+import * as Haptics from 'expo-haptics'
 import { DEFAULT_PROMPTS, PROMPT_SELECTION_SYSTEM_PROMPT } from '../../src/lib/prompts'
 import { getPersonalizedPrompts } from '../../src/lib/intakeMapping'
 import { getDrillById } from '../../src/lib/drills'
@@ -28,38 +31,44 @@ export default function HomeScreen() {
   const [suggestedDrills, setSuggestedDrills] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [focusMode, setFocusModeState] = useState<FocusMode>('mixed')
 
-  useEffect(() => {
+  const loadHomeData = useCallback(async () => {
     if (!user?.id) return
-    async function load() {
-      try {
-        const count = await getSessionCount(user!.id)
-        setSessionCount(count)
+    try {
+      const count = await getSessionCount(user.id)
+      setSessionCount(count)
 
-        const today = await getTodaySession(user!.id)
-        setTodaySession(today)
+      const today = await getTodaySession(user.id)
+      setTodaySession(today)
 
-        if (count >= 5) {
-          const vm = await getVoiceModel(user!.id)
-          setVoiceModel(vm)
-        }
-
-        // Load suggested drills from most recent completed session
-        const recent = await getRecentSessions(user!.id, 1)
-        if (recent[0]?.suggested_drills) {
-          setSuggestedDrills(recent[0].suggested_drills)
-        }
-
-        const fm = await getFocusMode()
-        setFocusModeState(fm)
-      } catch (err) {
-        if (__DEV__) console.error('Home data load:', err)
+      if (count >= 5) {
+        const vm = await getVoiceModel(user.id)
+        setVoiceModel(vm)
       }
-      setPageLoading(false)
+
+      const recent = await getRecentSessions(user.id, 1)
+      if (recent[0]?.suggested_drills) {
+        setSuggestedDrills(recent[0].suggested_drills)
+      }
+
+      const fm = await getFocusMode()
+      setFocusModeState(fm)
+    } catch (err) {
+      if (__DEV__) console.error('Home data load:', err)
     }
-    load()
   }, [user?.id])
+
+  useEffect(() => {
+    loadHomeData().then(() => setPageLoading(false))
+  }, [loadHomeData])
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await loadHomeData()
+    setRefreshing(false)
+  }, [loadHomeData])
 
   const firstName = user?.user_metadata?.full_name?.split(' ')[0]
     || user?.email?.split('@')[0]
@@ -128,6 +137,7 @@ export default function HomeScreen() {
   }, [sessionCount, user, voiceModel, focusMode])
 
   const handleFocusMode = useCallback(async (mode: FocusMode) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const prev = focusMode
     setFocusModeState(mode)
     try { await setFocusMode(mode) } catch (err) { if (__DEV__) console.error('Focus mode save failed:', err); setFocusModeState(prev) }
@@ -144,8 +154,8 @@ export default function HomeScreen() {
   // Already practiced today
   if (todaySession?.status === 'completed') {
     return (
-      <View style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.inkGhost} />}>
           <View style={styles.header}>
             <Text style={styles.logo}>CRISP</Text>
             {streak && <Text style={styles.streakBadge}>{streak.current_streak}d</Text>}
@@ -191,14 +201,14 @@ export default function HomeScreen() {
             </View>
           )}
         </ScrollView>
-      </View>
+      </SafeAreaView>
     )
   }
 
   // Ready to practice
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.inkGhost} />}>
         <View style={styles.header}>
           <Text style={styles.logo}>CRISP</Text>
           {streak && <Text style={styles.streakBadge}>{streak.current_streak}d</Text>}
@@ -264,14 +274,14 @@ export default function HomeScreen() {
           </View>
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.paper },
   center: { justifyContent: 'center', alignItems: 'center' },
-  scrollContent: { paddingHorizontal: 24, paddingTop: 60, paddingBottom: 120 },
+  scrollContent: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 120 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 80 },
   logo: { fontSize: 14, fontWeight: '500', letterSpacing: 3, color: colors.ink },
   streakBadge: { fontSize: 13, fontWeight: '500', color: colors.gold },

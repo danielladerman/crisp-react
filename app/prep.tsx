@@ -4,6 +4,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '../src/hooks/useAuth'
@@ -267,7 +268,7 @@ export default function PrepScreen() {
 
   if (phase === 'select') {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <TouchableOpacity onPress={() => router.back()}>
             <Text style={styles.backText}>← Back</Text>
@@ -289,7 +290,7 @@ export default function PrepScreen() {
             ))}
           </View>
         </ScrollView>
-      </View>
+      </SafeAreaView>
     )
   }
 
@@ -298,7 +299,8 @@ export default function PrepScreen() {
   if (phase === 'detail') {
     const category = PREP_SCENARIO_CATEGORIES.find(c => c.id === selectedCategory)
     return (
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <TouchableOpacity onPress={() => setPhase('select')}>
             <Text style={styles.backText}>← Back</Text>
@@ -334,6 +336,7 @@ export default function PrepScreen() {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+      </SafeAreaView>
     )
   }
 
@@ -341,7 +344,8 @@ export default function PrepScreen() {
 
   if (phase === 'conversation') {
     return (
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.conversationHeader}>
           <TouchableOpacity onPress={handleDone}>
             <Text style={styles.endText}>End Session</Text>
@@ -428,6 +432,7 @@ export default function PrepScreen() {
           {error && <Text style={styles.errorText}>{error}</Text>}
         </View>
       </KeyboardAvoidingView>
+      </SafeAreaView>
     )
   }
 
@@ -435,10 +440,10 @@ export default function PrepScreen() {
 
   if (phase === 'done') {
     return (
-      <View style={[styles.container, styles.center]}>
+      <SafeAreaView style={[styles.container, styles.center]} edges={['top']}>
         <Text style={styles.doneTitle}>Prep complete.</Text>
         <Text style={styles.doneSubtitle}>Good work. Go get it.</Text>
-      </View>
+      </SafeAreaView>
     )
   }
 
@@ -456,7 +461,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 60,
+    paddingTop: 16,
     paddingBottom: 40,
   },
   backText: {

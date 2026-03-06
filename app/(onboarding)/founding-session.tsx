@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { useAuth } from '../../src/hooks/useAuth'
 import { useSession } from '../../src/hooks/useSession'
@@ -89,7 +90,8 @@ export default function FoundingSessionScreen() {
   // --- Responding phase ---
   if (phase === 'prompt' || phase === 'responding') {
     return (
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.prompt}>{foundingPrompt.promptText}</Text>
 
@@ -154,13 +156,15 @@ export default function FoundingSessionScreen() {
           {error && <Text style={styles.errorText}>{error}</Text>}
         </ScrollView>
       </KeyboardAvoidingView>
+      </SafeAreaView>
     )
   }
 
   // --- Feedback phase ---
   if (phase === 'feedback') {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.prompt}>{foundingPrompt.promptText}</Text>
         <View style={styles.feedbackCard}>
           {feedbackLoading ? (
@@ -181,27 +185,28 @@ export default function FoundingSessionScreen() {
           </View>
         )}
       </ScrollView>
+      </SafeAreaView>
     )
   }
 
   // --- Done phase ---
   if (phase === 'done') {
     return (
-      <View style={[styles.container, styles.center]}>
+      <SafeAreaView style={[styles.container, styles.center]} edges={['top']}>
         <Text style={styles.closedTitle}>Session 1 complete.</Text>
         <Text style={styles.closedSubtitle}>Welcome to CRISP.</Text>
         <TouchableOpacity style={styles.button} onPress={() => router.replace('/(onboarding)/paywall')}>
           <Text style={styles.buttonText}>Continue</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     )
   }
 
   // Loading fallback
   return (
-    <View style={[styles.container, styles.center]}>
+    <SafeAreaView style={[styles.container, styles.center]} edges={['top']}>
       <ActivityIndicator color={colors.inkGhost} />
-    </View>
+    </SafeAreaView>
   )
 }
 
@@ -220,7 +225,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 60,
+    paddingTop: 16,
     paddingBottom: 40,
   },
   prompt: {

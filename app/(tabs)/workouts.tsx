@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../../src/hooks/useAuth'
 import {
   CATEGORIES, getDrillsByCategory, getDrillById,
@@ -78,7 +79,8 @@ export default function WorkoutsScreen() {
   // --- Drill active phase ---
   if (view === 'active' && selectedDrill) {
     return (
-      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <TouchableOpacity onPress={() => setView('category')}>
             <Text style={styles.backText}>← Back</Text>
@@ -117,13 +119,14 @@ export default function WorkoutsScreen() {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+      </SafeAreaView>
     )
   }
 
   // --- Drill complete ---
   if (view === 'complete' && selectedDrill) {
     return (
-      <View style={[styles.container, styles.centerContent]}>
+      <SafeAreaView style={[styles.container, styles.centerContent]} edges={['top']}>
         <Text style={styles.completeTitle}>Drill complete.</Text>
         <Text style={styles.completeSubtitle}>{selectedDrill.name}</Text>
         <TouchableOpacity
@@ -132,14 +135,14 @@ export default function WorkoutsScreen() {
         >
           <Text style={styles.buttonText}>Back to Library</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     )
   }
 
   // --- Category view ---
   if (view === 'category' && selectedCategory) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <TouchableOpacity onPress={() => setView('grid')}>
             <Text style={styles.backText}>← Library</Text>
@@ -164,13 +167,13 @@ export default function WorkoutsScreen() {
             ))}
           </View>
         </ScrollView>
-      </View>
+      </SafeAreaView>
     )
   }
 
   // --- Grid view ---
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.pageTitle}>Workout Library</Text>
         <Text style={styles.pageSubtitle}>Isolated technique practice. Pick a category.</Text>
@@ -215,7 +218,7 @@ export default function WorkoutsScreen() {
           ))}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   )
 }
 
@@ -232,7 +235,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 60,
+    paddingTop: 16,
     paddingBottom: 120,
   },
   backText: {

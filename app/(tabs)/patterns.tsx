@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
 } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../../src/hooks/useAuth'
 import { usePatterns } from '../../src/hooks/usePatterns'
 import { getSessionCount } from '../../src/lib/storage'
@@ -36,21 +37,21 @@ export default function PatternsScreen() {
 
   if (sessionCount < 3) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <Text style={styles.title}>Your Patterns</Text>
           <Text style={styles.emptyText}>
             Complete a few more sessions and your patterns will start forming here.
           </Text>
         </ScrollView>
-      </View>
+      </SafeAreaView>
     )
   }
 
   const hasAny = strengths.length > 0 || weaknesses.length > 0
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.title}>Your Patterns</Text>
         <Text style={styles.subtitle}>
@@ -109,14 +110,14 @@ export default function PatternsScreen() {
           </>
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.paper },
   center: { justifyContent: 'center', alignItems: 'center' },
-  scrollContent: { paddingHorizontal: 24, paddingTop: 60, paddingBottom: 120 },
+  scrollContent: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 120 },
   title: { fontSize: 20, fontWeight: '500', color: colors.ink, marginBottom: 8 },
   subtitle: { fontSize: 14, color: colors.inkMuted, marginBottom: 32 },
   emptyText: { fontSize: 15, lineHeight: 24, color: colors.inkMuted, marginTop: 16 },

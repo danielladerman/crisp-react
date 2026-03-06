@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import * as Haptics from 'expo-haptics'
 import { INTAKE_QUESTIONS } from '../../src/lib/intakeMapping'
 import { saveIntakeAnswers } from '../../src/lib/storage'
 import { colors } from '../../src/lib/theme'
@@ -16,6 +18,7 @@ export default function IntakeScreen() {
 
   async function handleSelect(optionId: string) {
     if (animating) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
     const updated = { ...answers, [question.id]: optionId }
     setAnswers(updated)
@@ -45,7 +48,7 @@ export default function IntakeScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
         {/* Header: back + progress dots */}
         <View style={styles.header}>
@@ -108,7 +111,7 @@ export default function IntakeScreen() {
           </View>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   )
 }
 
@@ -120,7 +123,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 60,
+    paddingTop: 16,
   },
   header: {
     flexDirection: 'row',

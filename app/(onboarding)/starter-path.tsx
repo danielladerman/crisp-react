@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { getIntakeLabel, getIntakeObservation, getStarterDrills } from '../../src/lib/intakeMapping'
 import { getDrillById } from '../../src/lib/drills'
@@ -15,7 +16,8 @@ export default function StarterPathScreen() {
   const drills = drillIds.map(getDrillById).filter(Boolean)
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.label}>Your starting point</Text>
       <Text style={styles.focusTitle}>{label}</Text>
       <Text style={styles.observation}>{observation}</Text>
@@ -49,6 +51,7 @@ export default function StarterPathScreen() {
         <Text style={styles.buttonText}>Start your first session</Text>
       </TouchableOpacity>
     </ScrollView>
+    </SafeAreaView>
   )
 }
 
@@ -59,7 +62,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 32,
-    paddingTop: 80,
+    paddingTop: 24,
     paddingBottom: 48,
     justifyContent: 'center',
   },
