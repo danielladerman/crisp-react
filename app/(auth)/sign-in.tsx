@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../../src/hooks/useAuth'
+import { supabase } from '../../src/lib/supabase'
 import { colors } from '../../src/lib/theme'
 
 export default function SignInScreen() {
@@ -104,6 +105,29 @@ export default function SignInScreen() {
         )}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {__DEV__ && (
+          <TouchableOpacity
+            style={styles.devSkip}
+            onPress={async () => {
+              setLoading(true)
+              setError('')
+              try {
+                await supabase.auth.signInWithPassword({
+                  email: 'dev@crisp.test',
+                  password: 'devtest123',
+                })
+              } catch (err: any) {
+                setError(err.message || 'Dev sign-in failed')
+              } finally {
+                setLoading(false)
+              }
+            }}
+            disabled={loading}
+          >
+            <Text style={styles.devSkipText}>Skip (Dev)</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </KeyboardAvoidingView>
     </SafeAreaView>
@@ -173,5 +197,13 @@ const styles = StyleSheet.create({
     color: colors.recording,
     textAlign: 'center',
     marginTop: 16,
+  },
+  devSkip: {
+    marginTop: 32,
+    alignItems: 'center',
+  },
+  devSkipText: {
+    fontSize: 13,
+    color: colors.inkGhost,
   },
 })

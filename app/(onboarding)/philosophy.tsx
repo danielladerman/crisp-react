@@ -24,7 +24,7 @@ export default function PhilosophyScreen() {
       </Text>
 
       <Text style={styles.body}>
-        Over time, the app builds a model of your voice — your patterns, your strengths, your edges — and uses it to personalize every session.
+        Over time, the app builds a model of your voice — your patterns, your strengths, your edges — and uses it to personalize every session. You can see everything it learns.
       </Text>
 
       <TouchableOpacity style={styles.button} onPress={() => router.push('/(onboarding)/intake')}>

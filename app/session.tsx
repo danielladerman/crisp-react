@@ -10,8 +10,6 @@ import { useAuth } from '../src/hooks/useAuth'
 import { useSession } from '../src/hooks/useSession'
 import { useStreak } from '../src/hooks/useStreak'
 import { usePatterns } from '../src/hooks/usePatterns'
-import { useVoiceRecorder } from '../src/hooks/useVoiceRecorder'
-import { useTranscription } from '../src/hooks/useTranscription'
 import { ScreenContainer, Button, Card, ErrorBoundary } from '../src/components/ui'
 import { getVoiceModel, upsertVoiceModel, updateStreak, getSession as fetchSession, getSessionInteractions } from '../src/lib/storage'
 import { loadCheckpoint, clearCheckpoint, SESSION_KEY } from '../src/lib/sessionCheckpoint'
@@ -34,10 +32,6 @@ export default function SessionScreen() {
   const { streak, recordPractice } = useStreak(user?.id)
   const { patterns } = usePatterns(user?.id)
   const [voiceModel, setVoiceModel] = useState<unknown>(null)
-
-  // Voice recording
-  const { isRecording, duration, startRecording, stopRecording, cancelRecording } = useVoiceRecorder()
-  const { transcribe, transcribing } = useTranscription()
 
   // Session hook
   const {
@@ -101,18 +95,6 @@ export default function SessionScreen() {
     })
   }, [user?.id])
 
-  // Handle voice recording stop → transcription
-  const handleStopRecording = useCallback(async () => {
-    const uri = await stopRecording()
-    if (!uri) return
-    try {
-      const text = await transcribe(uri)
-      setInputText(prev => prev ? `${prev}\n\n${text}` : text)
-    } catch (err) {
-      if (__DEV__) console.error('Transcription failed:', err)
-    }
-  }, [stopRecording, transcribe])
-
   // Handle submit
   const handleSubmit = useCallback(() => {
     if (!inputText.trim()) return
@@ -156,13 +138,6 @@ export default function SessionScreen() {
       ],
     )
   }, [phase])
-
-  // Format recording duration
-  const formatDuration = (secs: number) => {
-    const m = Math.floor(secs / 60)
-    const s = secs % 60
-    return `${m}:${s.toString().padStart(2, '0')}`
-  }
 
   // ── Responding Phase ─────────────────────────
 
@@ -218,56 +193,23 @@ export default function SessionScreen() {
                   textAlignVertical="top"
                 />
 
-                {/* Recording indicator */}
-                {isRecording && (
-                  <View style={styles.recordingBar}>
-                    <View style={styles.recordingDot} />
-                    <Text style={styles.recordingText}>Recording {formatDuration(duration)}</Text>
-                    <TouchableOpacity onPress={cancelRecording}>
-                      <Text style={styles.cancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {transcribing && (
-                  <View style={styles.recordingBar}>
-                    <ActivityIndicator size="small" color={colors.ink} />
-                    <Text style={styles.recordingText}>Transcribing...</Text>
-                  </View>
-                )}
-
                 {/* Action buttons */}
                 <View style={styles.inputActions}>
-                  {/* Mic button */}
-                  <TouchableOpacity
-                    style={styles.micButton}
-                    onPress={isRecording ? handleStopRecording : startRecording}
-                    disabled={transcribing}
-                  >
-                    <Ionicons
-                      name={isRecording ? 'stop-circle' : 'mic-outline'}
-                      size={24}
-                      color={isRecording ? colors.recording : colors.ink}
-                    />
-                  </TouchableOpacity>
-
-                  <View style={styles.inputButtonGroup}>
-                    {interactions.length > 0 && (
-                      <Button
-                        variant="secondary"
-                        onPress={handleDiveDeeper}
-                        disabled={!inputText.trim()}
-                      >
-                        Dive Deeper
-                      </Button>
-                    )}
+                  {interactions.length > 0 && (
                     <Button
-                      onPress={handleSubmit}
+                      variant="secondary"
+                      onPress={handleDiveDeeper}
                       disabled={!inputText.trim()}
                     >
-                      {interactions.length > 0 ? 'Next →' : 'Submit'}
+                      Dive Deeper
                     </Button>
-                  </View>
+                  )}
+                  <Button
+                    onPress={handleSubmit}
+                    disabled={!inputText.trim()}
+                  >
+                    {interactions.length > 0 ? 'Next →' : 'Submit'}
+                  </Button>
                 </View>
               </View>
             )}
@@ -440,44 +382,7 @@ const styles = StyleSheet.create({
     minHeight: 120,
     maxHeight: 240,
   },
-  recordingBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-  },
-  recordingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#D94A4A',
-  },
-  recordingText: {
-    fontSize: 14,
-    color: colors.inkMuted,
-    flex: 1,
-  },
-  cancelText: {
-    fontSize: 14,
-    color: colors.inkMuted,
-    textDecorationLine: 'underline',
-  },
   inputActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  micButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: colors.inkGhost,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inputButtonGroup: {
-    flex: 1,
     flexDirection: 'row',
     gap: 8,
     justifyContent: 'flex-end',

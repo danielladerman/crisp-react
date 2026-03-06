@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import * as Haptics from 'expo-haptics'
+// Dynamic import — expo-haptics is native-only
+let Haptics: any = null
+try { Haptics = require('expo-haptics') } catch {}
 import { INTAKE_QUESTIONS } from '../../src/lib/intakeMapping'
 import { saveIntakeAnswers } from '../../src/lib/storage'
 import { colors } from '../../src/lib/theme'
@@ -18,7 +20,7 @@ export default function IntakeScreen() {
 
   async function handleSelect(optionId: string) {
     if (animating) return
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    Haptics?.impactAsync(Haptics.ImpactFeedbackStyle.Light)
 
     const updated = { ...answers, [question.id]: optionId }
     setAnswers(updated)

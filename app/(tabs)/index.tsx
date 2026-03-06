@@ -8,7 +8,9 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useAuth } from '../../src/hooks/useAuth'
 import { useStreak } from '../../src/hooks/useStreak'
-import * as Haptics from 'expo-haptics'
+// Dynamic import — expo-haptics is native-only
+let Haptics: any = null
+try { Haptics = require('expo-haptics') } catch {}
 import { DEFAULT_PROMPTS, PROMPT_SELECTION_SYSTEM_PROMPT } from '../../src/lib/prompts'
 import { getPersonalizedPrompts } from '../../src/lib/intakeMapping'
 import { getDrillById } from '../../src/lib/drills'
@@ -137,7 +139,7 @@ export default function HomeScreen() {
   }, [sessionCount, user, voiceModel, focusMode])
 
   const handleFocusMode = useCallback(async (mode: FocusMode) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    Haptics?.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const prev = focusMode
     setFocusModeState(mode)
     try { await setFocusMode(mode) } catch (err) { if (__DEV__) console.error('Focus mode save failed:', err); setFocusModeState(prev) }

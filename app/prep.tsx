@@ -10,8 +10,6 @@ import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '../src/hooks/useAuth'
 import { useStreak } from '../src/hooks/useStreak'
 import { usePatterns } from '../src/hooks/usePatterns'
-import { useVoiceRecorder } from '../src/hooks/useVoiceRecorder'
-import { useTranscription } from '../src/hooks/useTranscription'
 import {
   createSession, updateSession, addInteraction, getVoiceModel, upsertVoiceModel,
   getSessionCount, updateStreak,
@@ -31,9 +29,6 @@ export default function PrepScreen() {
   const router = useRouter()
   const { user } = useAuth()
   const { patterns } = usePatterns(user?.id)
-  const { isRecording, duration, startRecording, stopRecording, cancelRecording } = useVoiceRecorder()
-  const { transcribe, transcribing } = useTranscription()
-
   const [phase, setPhase] = useState<PrepPhase>('select')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [detailText, setDetailText] = useState('')
@@ -181,18 +176,6 @@ export default function PrepScreen() {
     }
   }, [session, user?.id, inputText, interactions, buildPrepPrompt])
 
-  // Voice recording
-  const handleStopRecording = useCallback(async () => {
-    const uri = await stopRecording()
-    if (!uri) return
-    try {
-      const text = await transcribe(uri)
-      setInputText(prev => prev ? `${prev}\n\n${text}` : text)
-    } catch (err) {
-      if (__DEV__) console.error('Transcription failed:', err)
-    }
-  }, [stopRecording, transcribe])
-
   // End prep session
   const handleDone = useCallback(async () => {
     if (!session || !user?.id) {
@@ -256,12 +239,6 @@ export default function PrepScreen() {
     } catch (err) {
       if (__DEV__) console.error('Voice model update failed:', err)
     }
-  }
-
-  const formatDuration = (secs: number) => {
-    const m = Math.floor(secs / 60)
-    const s = secs % 60
-    return `${m}:${s.toString().padStart(2, '0')}`
   }
 
   // ── Scenario Selection ─────────────────────────
@@ -380,36 +357,7 @@ export default function PrepScreen() {
 
         {/* Input area */}
         <View style={styles.inputBar}>
-          {isRecording && (
-            <View style={styles.recordingBar}>
-              <View style={styles.recordingDot} />
-              <Text style={styles.recordingText}>Recording {formatDuration(duration)}</Text>
-              <TouchableOpacity onPress={cancelRecording}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {transcribing && (
-            <View style={styles.recordingBar}>
-              <ActivityIndicator size="small" color={colors.ink} />
-              <Text style={styles.recordingText}>Transcribing...</Text>
-            </View>
-          )}
-
           <View style={styles.inputRow}>
-            <TouchableOpacity
-              style={styles.micButton}
-              onPress={isRecording ? handleStopRecording : startRecording}
-              disabled={transcribing}
-            >
-              <Ionicons
-                name={isRecording ? 'stop-circle' : 'mic-outline'}
-                size={22}
-                color={isRecording ? colors.recording : colors.ink}
-              />
-            </TouchableOpacity>
-
             <TextInput
               style={styles.chatInput}
               value={inputText}
@@ -581,15 +529,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 8,
   },
-  micButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.inkGhost,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   chatInput: {
     flex: 1,
     fontSize: 16,
@@ -611,29 +550,6 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: colors.paperDeep,
-  },
-  recordingBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
-  recordingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#D94A4A',
-  },
-  recordingText: {
-    fontSize: 14,
-    color: colors.inkMuted,
-    flex: 1,
-  },
-  cancelText: {
-    fontSize: 14,
-    color: colors.inkMuted,
-    textDecorationLine: 'underline',
   },
   errorText: {
     fontSize: 13,
