@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView,
-  StyleSheet, Modal, KeyboardAvoidingView, Platform, Alert,
+  StyleSheet, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -11,10 +11,11 @@ import { useSession } from '../src/hooks/useSession'
 import { useStreak } from '../src/hooks/useStreak'
 import { usePatterns } from '../src/hooks/usePatterns'
 import { ScreenContainer, Button, Card, ErrorBoundary } from '../src/components/ui'
-import { getVoiceModel, upsertVoiceModel, updateStreak, getSession as fetchSession, getSessionInteractions } from '../src/lib/storage'
+import { getVoiceModel, upsertVoiceModel, updateStreak, getSession as fetchSession, getSessionInteractions, getPatterns } from '../src/lib/storage'
 import { loadCheckpoint, clearCheckpoint, SESSION_KEY } from '../src/lib/sessionCheckpoint'
 import { mapAnswersToVoiceModel } from '../src/lib/intakeMapping'
-import { getDrillById } from '../src/lib/drills'
+import { getDrillById, WEAKNESS_TO_DRILL } from '../src/lib/drills'
+import { callClaude } from '../src/lib/claude'
 import { colors, spacing } from '../src/lib/theme'
 
 export default function SessionScreen() {
@@ -25,6 +26,7 @@ export default function SessionScreen() {
     promptText: string
     sessionCount: string
     focusMode?: string
+    resumeSessionId?: string
   }>()
 
   const sessionCount = parseInt(params.sessionCount || '0', 10)
@@ -36,18 +38,23 @@ export default function SessionScreen() {
   // Session hook
   const {
     phase, session, interactions, feedbackText, feedbackLoading,
-    suggestedDrills, error,
-    startSession, submitResponse, diveDeeper, tryAgain, completeSession,
+    suggestedDrills, markedText, error,
+    startSession, submitResponse, tryAgain,
+    markMoments, completeSession,
     setPhase, setSession, setInteractions, setFeedbackText,
   } = useSession({ userId: user?.id || '', sessionCount, voiceModel, patterns, focusMode })
 
   // Local state for text input
   const [inputText, setInputText] = useState('')
-  const [showDrillsModal, setShowDrillsModal] = useState(false)
+  // Marking phase state
+  const [chunks, setChunks] = useState<string[]>([])
+  const [selectedChunks, setSelectedChunks] = useState<Set<number>>(new Set())
+  const [aiPicks, setAiPicks] = useState<Set<number>>(new Set())
+  const [drillRationales, setDrillRationales] = useState<Record<string, string>>({})
 
-  // Load voice model
+  // Load voice model (available from session 2 onward — founding session seeds it)
   useEffect(() => {
-    if (!user?.id || sessionCount < 5) return
+    if (!user?.id || sessionCount < 1) return
     let cancelled = false
     getVoiceModel(user.id).then(async (vm) => {
       if (cancelled) return
@@ -66,12 +73,19 @@ export default function SessionScreen() {
     return () => { cancelled = true }
   }, [user?.id, sessionCount])
 
-  // Auto-start session on mount (or restore from checkpoint)
+  // Auto-start session on mount (or restore from checkpoint / resumeSessionId)
   const startedRef = useRef(false)
   useEffect(() => {
     if (startedRef.current || !user?.id) return
     startedRef.current = true
 
+    // Direct resume: home screen passed a specific session ID to continue
+    if (params.resumeSessionId) {
+      restoreSession(params.resumeSessionId)
+      return
+    }
+
+    // Checkpoint restore or new session
     loadCheckpoint(SESSION_KEY).then(async (cp) => {
       if (cp?.sessionId) {
         try {
@@ -95,6 +109,35 @@ export default function SessionScreen() {
     })
   }, [user?.id])
 
+  // Restore a session directly from DB (used by "Continue where you left off")
+  async function restoreSession(sessionId: string) {
+    try {
+      const [restored, ints] = await Promise.all([
+        fetchSession(sessionId),
+        getSessionInteractions(sessionId),
+      ])
+      if (restored && restored.status !== 'completed') {
+        setSession(restored)
+        setInteractions(ints)
+        // Determine phase from interactions: if there's a feedback interaction, show feedback
+        const hasFeedback = ints.some((i: any) => i.interaction_type === 'feedback')
+        const lastInteraction = ints[ints.length - 1]
+        if (hasFeedback && lastInteraction?.role === 'assistant') {
+          setFeedbackText(lastInteraction.content)
+          setPhase('feedback')
+        } else {
+          setPhase('responding')
+        }
+        return
+      }
+      // Session was already completed — start a fresh one
+      startSession(params.promptType || 'reveal', params.promptText || '')
+    } catch (err) {
+      if (__DEV__) console.error('Session resume failed:', err)
+      startSession(params.promptType || 'reveal', params.promptText || '')
+    }
+  }
+
   // Handle submit
   const handleSubmit = useCallback(() => {
     if (!inputText.trim()) return
@@ -102,30 +145,99 @@ export default function SessionScreen() {
     setInputText('')
   }, [inputText, submitResponse])
 
-  // Handle dive deeper
-  const handleDiveDeeper = useCallback(() => {
-    if (!inputText.trim()) return
-    diveDeeper(inputText.trim())
-    setInputText('')
-  }, [inputText, diveDeeper])
+  // Handle marking → done → update streak, show drills popup
 
-  // Handle done → update streak, show drills popup
-  const handleDone = useCallback(async () => {
+  // Split user messages into sentence chunks for marking
+  function splitIntoChunks(text: string): string[] {
+    return text
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 10) // skip very short fragments
+  }
+
+  const handleGoToMarking = useCallback(async () => {
+    // Extract user messages only, split into chunks
+    const userMessages = interactions.filter(i => i.role === 'user')
+    if (__DEV__) console.log('[handleGoToMarking] interactions:', interactions.length, 'userMessages:', userMessages.length)
+    const allChunks = userMessages.flatMap(i => splitIntoChunks(i.content))
+    if (__DEV__) console.log('[handleGoToMarking] chunks:', allChunks.length, allChunks.map(c => c.substring(0, 40)))
+    setChunks(allChunks)
+    setSelectedChunks(new Set())
+    setAiPicks(new Set())
+    setPhase('marking')
+
+    // AI pre-suggest 1-2 strongest moments
+    if (allChunks.length > 1) {
+      try {
+        const numbered = allChunks.map((c, i) => `${i}: ${c}`).join('\n')
+        const result = await callClaude({
+          systemPrompt: 'You are selecting the most expressive or insightful moments from a user\'s session. Return ONLY a JSON array of indices (e.g. [0, 3]). Pick 1-2 moments that show the strongest self-expression, insight, or vulnerability. No explanation.',
+          messages: [{ role: 'user', content: numbered }],
+          maxTokens: 50,
+        })
+        const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+        const indices: number[] = JSON.parse(cleaned)
+        const validIndices = indices.filter(i => i >= 0 && i < allChunks.length)
+        setAiPicks(new Set(validIndices))
+        setSelectedChunks(new Set(validIndices)) // pre-select AI picks
+      } catch (err) {
+        if (__DEV__) console.error('AI pick suggestion failed:', err)
+      }
+    }
+
+    // Build drill rationales for the post-session modal
+    if (suggestedDrills && suggestedDrills.length > 0 && user?.id) {
+      try {
+        const userPatterns = await getPatterns(user.id)
+        const weaknesses = userPatterns.filter(p => p.pattern_type === 'weakness' && p.status === 'active')
+        const drillToWeakness: Record<string, string> = {}
+        for (const [weaknessId, drillId] of Object.entries(WEAKNESS_TO_DRILL)) {
+          drillToWeakness[drillId as string] = weaknessId
+        }
+        const rationales: Record<string, string> = {}
+        for (const drillId of suggestedDrills) {
+          const weaknessId = drillToWeakness[drillId]
+          if (weaknessId) {
+            const match = weaknesses.find(w => w.pattern_id === weaknessId)
+            if (match) {
+              rationales[drillId] = `Targets your ${weaknessId.replace(/-/g, ' ')} pattern`
+            }
+          }
+        }
+        setDrillRationales(rationales)
+      } catch (err) {
+        if (__DEV__) console.error('Failed to build drill rationales:', err)
+      }
+    }
+  }, [interactions, suggestedDrills, user?.id])
+
+  const toggleChunk = useCallback((index: number) => {
+    setSelectedChunks(prev => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }, [])
+
+  const handleSaveAndDone = useCallback(async () => {
+    const selected = Array.from(selectedChunks).map(i => chunks[i]).filter(Boolean)
+    if (__DEV__) console.log('[handleSaveAndDone] selectedChunks:', Array.from(selectedChunks), 'resolved texts:', selected.length)
+    if (selected.length > 0) {
+      await markMoments(selected)
+    }
     if (user?.id) {
       try { await updateStreak(user.id) } catch (err) { if (__DEV__) console.error('Streak update failed:', err) }
     }
     await completeSession()
-    if (suggestedDrills && suggestedDrills.length > 0) {
-      setShowDrillsModal(true)
-    } else {
-      router.back()
-    }
-  }, [user?.id, completeSession, suggestedDrills])
+  }, [user?.id, selectedChunks, chunks, markMoments, completeSession])
 
-  const handleDrillModalClose = useCallback(() => {
-    setShowDrillsModal(false)
-    router.back()
-  }, [])
+  const handleFinishNoMarking = useCallback(async () => {
+    if (user?.id) {
+      try { await updateStreak(user.id) } catch (err) { if (__DEV__) console.error('Streak update failed:', err) }
+    }
+    await completeSession()
+  }, [user?.id, completeSession])
 
   const handleExit = useCallback(() => {
     if (phase === 'done') { router.back(); return }
@@ -134,7 +246,7 @@ export default function SessionScreen() {
       'Your responses are saved. You can start a new session anytime.',
       [
         { text: 'Stay', style: 'cancel' },
-        { text: 'Leave', style: 'destructive', onPress: () => router.back() },
+        { text: 'End Session', style: 'destructive', onPress: () => router.back() },
       ],
     )
   }, [phase])
@@ -195,15 +307,6 @@ export default function SessionScreen() {
 
                 {/* Action buttons */}
                 <View style={styles.inputActions}>
-                  {interactions.length > 0 && (
-                    <Button
-                      variant="secondary"
-                      onPress={handleDiveDeeper}
-                      disabled={!inputText.trim()}
-                    >
-                      Dive Deeper
-                    </Button>
-                  )}
                   <Button
                     onPress={handleSubmit}
                     disabled={!inputText.trim()}
@@ -252,10 +355,10 @@ export default function SessionScreen() {
           {!feedbackLoading && (
             <View style={styles.actions}>
               <Button variant="secondary" onPress={tryAgain}>
-                Try Again
+                Refine my response
               </Button>
-              <Button onPress={handleDone}>
-                Done
+              <Button onPress={handleGoToMarking}>
+                Continue
               </Button>
             </View>
           )}
@@ -264,36 +367,86 @@ export default function SessionScreen() {
     )
   }
 
-  // ── Done Phase (brief, then navigate home) ───
+  // ── Marking Phase (select moments to save to library) ──
+
+  if (phase === 'marking') {
+    return (
+      <ErrorBoundary fallbackMessage="Something went wrong.">
+        <ScreenContainer scroll>
+          <TouchableOpacity style={styles.closeButton} onPress={handleExit}>
+            <Ionicons name="close" size={24} color={colors.inkMuted} />
+          </TouchableOpacity>
+
+          <Text style={styles.markingTitle}>Mark your moments</Text>
+          <Text style={styles.markingSubtitle}>
+            Tap any lines that resonated. These go to your library.
+          </Text>
+
+          {chunks.length === 0 && (
+            <Text style={styles.markingSubtitle}>No moments to select.</Text>
+          )}
+
+          {chunks.map((chunk, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.chunkCard,
+                selectedChunks.has(index) && styles.chunkCardSelected,
+              ]}
+              onPress={() => toggleChunk(index)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.chunkRow}>
+                <Text style={[
+                  styles.chunkText,
+                  selectedChunks.has(index) && styles.chunkTextSelected,
+                ]}>
+                  {chunk}
+                </Text>
+                {aiPicks.has(index) && (
+                  <Text style={styles.crispPick}>Crisp pick</Text>
+                )}
+              </View>
+              {selectedChunks.has(index) && (
+                <Ionicons name="checkmark-circle" size={18} color={colors.gold} style={{ marginTop: 4 }} />
+              )}
+            </TouchableOpacity>
+          ))}
+
+          <View style={styles.actions}>
+            <Button variant="secondary" onPress={handleFinishNoMarking}>
+              Done
+            </Button>
+            {selectedChunks.size > 0 && (
+              <Button onPress={handleSaveAndDone}>
+                Save {selectedChunks.size} moment{selectedChunks.size > 1 ? 's' : ''}
+              </Button>
+            )}
+          </View>
+        </ScreenContainer>
+      </ErrorBoundary>
+    )
+  }
+
+  // ── Done Phase (single screen: complete + suggested drills + done) ───
 
   if (phase === 'done') {
     return (
       <ErrorBoundary fallbackMessage="Something went wrong.">
-        <ScreenContainer>
-          <View style={styles.doneContainer}>
+        <ScreenContainer scroll>
+          <View style={styles.doneHeader}>
             <Text style={styles.doneTitle}>Session complete</Text>
             {streak && (
               <Text style={styles.streakText}>{streak.current_streak} day streak</Text>
             )}
-            <Button onPress={() => router.back()} style={{ marginTop: 24 }}>
-              Home
-            </Button>
           </View>
-        </ScreenContainer>
 
-        {/* Suggested Drills Modal */}
-        <Modal
-          visible={showDrillsModal}
-          transparent
-          animationType="slide"
-          onRequestClose={handleDrillModalClose}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Suggested Workouts</Text>
-              <Text style={styles.modalSubtitle}>Based on this session</Text>
+          {suggestedDrills && suggestedDrills.length > 0 && (
+            <View style={styles.suggestedSection}>
+              <Text style={styles.suggestedTitle}>SUGGESTED WORKOUTS</Text>
+              <Text style={styles.suggestedSubtitle}>Based on this session</Text>
 
-              {suggestedDrills?.map(drillId => {
+              {suggestedDrills.map(drillId => {
                 const drill = getDrillById(drillId)
                 if (!drill) return null
                 return (
@@ -301,22 +454,24 @@ export default function SessionScreen() {
                     key={drill.id}
                     style={styles.drillCard}
                     onPress={() => {
-                      setShowDrillsModal(false)
-                      router.replace('/(tabs)/workouts')
+                      router.replace({ pathname: '/(tabs)/workouts', params: { drillId: drill.id } })
                     }}
                   >
                     <Text style={styles.drillName}>{drill.name}</Text>
+                    {drillRationales[drill.id] && (
+                      <Text style={styles.drillRationale}>{drillRationales[drill.id]}</Text>
+                    )}
                     <Text style={styles.drillMeta}>{drill.category} · {drill.difficulty}</Text>
                   </TouchableOpacity>
                 )
               })}
-
-              <Button variant="secondary" onPress={handleDrillModalClose} style={{ marginTop: 16 }}>
-                Skip
-              </Button>
             </View>
-          </View>
-        </Modal>
+          )}
+
+          <Button onPress={() => router.back()} style={{ marginTop: 32 }}>
+            Done
+          </Button>
+        </ScreenContainer>
       </ErrorBoundary>
     )
   }
@@ -401,10 +556,10 @@ const styles = StyleSheet.create({
     color: '#D94A4A',
     marginTop: 8,
   },
-  doneContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  doneHeader: {
     alignItems: 'center',
+    paddingTop: 48,
+    marginBottom: 32,
   },
   doneTitle: {
     fontSize: 24,
@@ -416,27 +571,19 @@ const styles = StyleSheet.create({
     color: colors.inkMuted,
     marginTop: 8,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+  suggestedSection: {
+    marginTop: 8,
   },
-  modalContent: {
-    backgroundColor: colors.paper,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    paddingBottom: 40,
-  },
-  modalTitle: {
-    fontSize: 20,
+  suggestedTitle: {
+    fontSize: 11,
     fontWeight: '600',
-    color: colors.ink,
+    letterSpacing: 0.5,
+    color: colors.inkGhost,
+    marginBottom: 4,
   },
-  modalSubtitle: {
+  suggestedSubtitle: {
     fontSize: 14,
     color: colors.inkMuted,
-    marginTop: 4,
     marginBottom: 16,
   },
   drillCard: {
@@ -445,14 +592,66 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 8,
   },
+  markingTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.ink,
+    marginBottom: 8,
+  },
+  markingSubtitle: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.inkMuted,
+    marginBottom: 24,
+  },
   drillName: {
     fontSize: 16,
     fontWeight: '500',
     color: colors.ink,
   },
+  drillRationale: {
+    fontSize: 13,
+    color: colors.gold,
+    fontStyle: 'italic' as const,
+    marginTop: 2,
+  },
   drillMeta: {
     fontSize: 13,
     color: colors.inkMuted,
     marginTop: 4,
+  },
+  chunkCard: {
+    backgroundColor: colors.paperDim,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  chunkCardSelected: {
+    borderColor: colors.gold,
+    backgroundColor: colors.paperDeep,
+  },
+  chunkRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'flex-start' as const,
+    gap: 8,
+  },
+  chunkText: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.ink,
+    flex: 1,
+  },
+  chunkTextSelected: {
+    fontWeight: '500' as const,
+  },
+  crispPick: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    color: colors.gold,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase' as const,
   },
 })

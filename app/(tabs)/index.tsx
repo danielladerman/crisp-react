@@ -5,22 +5,41 @@ import {
   RefreshControl,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useFocusEffect } from 'expo-router'
 import { useAuth } from '../../src/hooks/useAuth'
 import { useStreak } from '../../src/hooks/useStreak'
 // Dynamic import — expo-haptics is native-only
 let Haptics: any = null
 try { Haptics = require('expo-haptics') } catch {}
-import { DEFAULT_PROMPTS, PROMPT_SELECTION_SYSTEM_PROMPT } from '../../src/lib/prompts'
+import { DEFAULT_PROMPTS, PROMPT_SELECTION_SYSTEM_PROMPT, CONTINUATION_PROMPT_SYSTEM_PROMPT } from '../../src/lib/prompts'
 import { getPersonalizedPrompts } from '../../src/lib/intakeMapping'
-import { getDrillById } from '../../src/lib/drills'
+import { getDrillById, WEAKNESS_TO_DRILL } from '../../src/lib/drills'
 import { callClaude } from '../../src/lib/claude'
 import {
   getVoiceModel, getSessionCount, getTodaySession, getRecentSessions,
-  getFocusMode, setFocusMode,
+  getFocusMode, setFocusMode, getAllWorkoutProgress, getPatterns,
+  getSessionInteractions,
 } from '../../src/lib/storage'
 import type { FocusMode } from '../../src/lib/storage'
 import { colors } from '../../src/lib/theme'
+
+function formatSessionSummary(session: any, lastUserContent: string): string {
+  const date = new Date(session.created_at)
+  const now = new Date()
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
+
+  let dateLabel: string
+  if (diffDays === 0) dateLabel = 'Today'
+  else if (diffDays === 1) dateLabel = 'Yesterday'
+  else if (diffDays < 7) dateLabel = date.toLocaleDateString('en-US', { weekday: 'long' })
+  else dateLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+  const content = lastUserContent.length > 60
+    ? lastUserContent.substring(0, 57) + '...'
+    : lastUserContent
+
+  return `${dateLabel}: ${content}`
+}
 
 export default function HomeScreen() {
   const router = useRouter()
@@ -29,8 +48,12 @@ export default function HomeScreen() {
 
   const [sessionCount, setSessionCount] = useState(0)
   const [todaySession, setTodaySession] = useState<any>(null)
+  const [todayActiveSession, setTodayActiveSession] = useState<any>(null)
+  const [lastSession, setLastSession] = useState<any>(null)
+  const [lastSessionSummary, setLastSessionSummary] = useState('')
   const [voiceModel, setVoiceModel] = useState<any>(null)
   const [suggestedDrills, setSuggestedDrills] = useState<string[]>([])
+  const [drillRationales, setDrillRationales] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -44,15 +67,74 @@ export default function HomeScreen() {
 
       const today = await getTodaySession(user.id)
       setTodaySession(today)
+      setTodayActiveSession(today?.status === 'active' ? today : null)
 
-      if (count >= 5) {
+      if (count >= 1) {
         const vm = await getVoiceModel(user.id)
         setVoiceModel(vm)
       }
 
-      const recent = await getRecentSessions(user.id, 1)
-      if (recent[0]?.suggested_drills) {
-        setSuggestedDrills(recent[0].suggested_drills)
+      // Fetch last completed session for "pick up where you left off"
+      const recent = await getRecentSessions(user.id, 10)
+      const lastCompleted = recent.find((s: any) => s.status === 'completed')
+      setLastSession(lastCompleted || null)
+      if (lastCompleted) {
+        try {
+          const ints = await getSessionInteractions(lastCompleted.id)
+          const lastUserMsg = [...ints].reverse().find((i: any) => i.role === 'user')
+          const summary = formatSessionSummary(lastCompleted, lastUserMsg?.content || lastCompleted.prompt_text)
+          setLastSessionSummary(summary)
+        } catch {
+          setLastSessionSummary('')
+        }
+      } else {
+        setLastSessionSummary('')
+      }
+
+      // Aggregate suggested drills across recent sessions, ranked by frequency
+      const drillCounts: Record<string, number> = {}
+      for (const sess of recent) {
+        if (sess.suggested_drills) {
+          for (const id of sess.suggested_drills) {
+            drillCounts[id] = (drillCounts[id] || 0) + 1
+          }
+        }
+      }
+      const sorted = Object.entries(drillCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([id]) => id)
+      if (sorted.length > 0) {
+        const progress = await getAllWorkoutProgress(user.id)
+        const completedIds = new Set(progress.map((p: any) => p.drill_id))
+        const filtered = sorted.filter(id => !completedIds.has(id)).slice(0, 3)
+        setSuggestedDrills(filtered)
+
+        // Build rationale map: drill_id → "Targets your X pattern"
+        if (filtered.length > 0) {
+          try {
+            const userPatterns = await getPatterns(user.id)
+            const weaknesses = userPatterns.filter(p => p.pattern_type === 'weakness' && p.status === 'active')
+            // Reverse map: drill_id → weakness pattern_id
+            const drillToWeakness: Record<string, string> = {}
+            for (const [weaknessId, drillId] of Object.entries(WEAKNESS_TO_DRILL)) {
+              drillToWeakness[drillId] = weaknessId
+            }
+            const rationales: Record<string, string> = {}
+            for (const drillId of filtered) {
+              const weaknessId = drillToWeakness[drillId]
+              if (weaknessId) {
+                const match = weaknesses.find(w => w.pattern_id === weaknessId)
+                if (match) {
+                  const evidenceCount = match.evidence?.length || 0
+                  rationales[drillId] = `Targets your ${weaknessId.replace(/-/g, ' ')} pattern${evidenceCount > 1 ? ` (seen ${evidenceCount} times)` : ''}`
+                }
+              }
+            }
+            setDrillRationales(rationales)
+          } catch (err) {
+            if (__DEV__) console.error('Failed to build drill rationales:', err)
+          }
+        }
       }
 
       const fm = await getFocusMode()
@@ -66,6 +148,14 @@ export default function HomeScreen() {
     loadHomeData().then(() => setPageLoading(false))
   }, [loadHomeData])
 
+  // Re-fetch when tab gains focus (e.g. after completing a session)
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return
+      loadHomeData()
+    }, [loadHomeData, user?.id])
+  )
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     await loadHomeData()
@@ -78,6 +168,77 @@ export default function HomeScreen() {
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+
+  // "Pick up where you left off" — generate a continuation prompt from last session
+  const handleContinueThread = useCallback(async () => {
+    if (!lastSession) return
+    setLoading(true)
+    try {
+      let prompt: { promptType: string; promptText: string } | null = null
+
+      // Get the last user message from the previous session for context
+      const ints = await getSessionInteractions(lastSession.id)
+      const lastUserMsg = [...ints].reverse().find((i: any) => i.role === 'user')
+      const previousContext = `Previous session prompt: ${lastSession.prompt_text}\n\nUser's last response: ${lastUserMsg?.content || '(no response)'}`
+
+      try {
+        const result = await callClaude({
+          systemPrompt: CONTINUATION_PROMPT_SYSTEM_PROMPT,
+          messages: [{
+            role: 'user',
+            content: voiceModel
+              ? `${previousContext}\n\nVoice model:\n${JSON.stringify(voiceModel, null, 2)}`
+              : previousContext,
+          }],
+          maxTokens: 300,
+        })
+        const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+        prompt = JSON.parse(cleaned)
+      } catch (err) {
+        if (__DEV__) console.error('Continuation prompt generation failed:', err)
+      }
+
+      // Fallback: simple continuation
+      if (!prompt) {
+        const topic = lastSession.prompt_text.length > 60
+          ? lastSession.prompt_text.substring(0, 60) + '...'
+          : lastSession.prompt_text
+        prompt = {
+          promptType: 'continuation',
+          promptText: `Last time you explored: "${topic}" — what's still unresolved for you?`,
+        }
+      }
+
+      router.push({
+        pathname: '/session',
+        params: {
+          promptType: prompt.promptType,
+          promptText: prompt.promptText,
+          sessionCount: String(sessionCount),
+          focusMode,
+        },
+      })
+    } catch (err) {
+      if (__DEV__) console.error('Failed to continue thread:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [lastSession, voiceModel, sessionCount, focusMode])
+
+  // Resume today's in-progress session
+  const handleResumeSession = useCallback(() => {
+    if (!todayActiveSession) return
+    router.push({
+      pathname: '/session',
+      params: {
+        resumeSessionId: todayActiveSession.id,
+        promptType: todayActiveSession.prompt_type,
+        promptText: todayActiveSession.prompt_text,
+        sessionCount: String(sessionCount),
+        focusMode,
+      },
+    })
+  }, [todayActiveSession, sessionCount, focusMode])
 
   const handleStartSession = useCallback(async () => {
     setLoading(true)
@@ -153,68 +314,137 @@ export default function HomeScreen() {
     )
   }
 
-  // Already practiced today
-  if (todaySession?.status === 'completed') {
+  // ── Shared UI fragments ────────────────────────
+
+  const headerBlock = (
+    <View style={styles.header}>
+      <Text style={styles.logo}>CRISP</Text>
+      {streak && <Text style={styles.streakBadge}>{streak.current_streak}d</Text>}
+    </View>
+  )
+
+  const suggestedDrillsBlock = suggestedDrills.length > 0 ? (
+    <View style={styles.suggestedSection}>
+      <Text style={styles.suggestedTitle}>SUGGESTED WORKOUTS</Text>
+      {suggestedDrills.map(drillId => {
+        const drill = getDrillById(drillId)
+        if (!drill) return null
+        return (
+          <TouchableOpacity
+            key={drill.id}
+            style={styles.suggestedCard}
+            onPress={() => router.push({ pathname: '/(tabs)/workouts', params: { drillId: drill.id } })}
+          >
+            <Text style={styles.suggestedName}>{drill.name}</Text>
+            {drillRationales[drill.id] && (
+              <Text style={styles.suggestedRationale}>{drillRationales[drill.id]}</Text>
+            )}
+            <Text style={styles.suggestedMeta}>{drill.category}</Text>
+          </TouchableOpacity>
+        )
+      })}
+    </View>
+  ) : null
+
+  const prepLink = (
+    <TouchableOpacity style={styles.prepButton} onPress={() => router.push('/prep')}>
+      <Text style={styles.prepButtonText}>Prep for something →</Text>
+    </TouchableOpacity>
+  )
+
+  const continueThreadButton = lastSession && sessionCount > 0 ? (
+    <View style={styles.continueSection}>
+      <TouchableOpacity
+        style={[styles.continueButton, loading && styles.startButtonDisabled]}
+        onPress={handleContinueThread}
+        disabled={loading}
+      >
+        <Text style={styles.continueButtonText}>
+          {loading ? 'Preparing...' : 'Pick up where you left off'}
+        </Text>
+      </TouchableOpacity>
+      {lastSessionSummary ? (
+        <Text style={styles.continueSummary}>{lastSessionSummary}</Text>
+      ) : null}
+    </View>
+  ) : null
+
+  // ── Branch A: Today's session in progress ─────
+
+  if (todayActiveSession) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.inkGhost} />}>
-          <View style={styles.header}>
-            <Text style={styles.logo}>CRISP</Text>
-            {streak && <Text style={styles.streakBadge}>{streak.current_streak}d</Text>}
-          </View>
+          {headerBlock}
 
           <View style={styles.centerContent}>
-            <Text style={styles.doneText}>You practiced today.</Text>
+            <Text style={styles.greeting}>You started a session earlier.</Text>
 
-            <TouchableOpacity onPress={handleStartSession} disabled={loading}>
-              <Text style={[styles.practiceAgain, loading && { opacity: 0.5 }]}>
-                {loading ? 'Preparing...' : 'Or practice again →'}
-              </Text>
+            <TouchableOpacity
+              style={[styles.startButton, { marginTop: 32 }]}
+              onPress={handleResumeSession}
+            >
+              <Text style={styles.startButtonText}>Continue where you left off</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.prepButton}
-              onPress={() => router.push('/prep')}
+              style={styles.secondaryAction}
+              onPress={handleStartSession}
+              disabled={loading}
             >
-              <Text style={styles.prepButtonText}>Prep for something →</Text>
+              <Text style={[styles.secondaryActionText, loading && { opacity: 0.5 }]}>
+                {loading ? 'Preparing...' : 'Start a new session'}
+              </Text>
             </TouchableOpacity>
 
-            <Text style={styles.comeBack}>Come back tomorrow.</Text>
+            {prepLink}
           </View>
 
-          {/* Suggested drills from last session */}
-          {suggestedDrills.length > 0 && (
-            <View style={styles.suggestedSection}>
-              <Text style={styles.suggestedTitle}>SUGGESTED WORKOUTS</Text>
-              {suggestedDrills.map(drillId => {
-                const drill = getDrillById(drillId)
-                if (!drill) return null
-                return (
-                  <TouchableOpacity
-                    key={drill.id}
-                    style={styles.suggestedCard}
-                    onPress={() => router.push('/(tabs)/workouts')}
-                  >
-                    <Text style={styles.suggestedName}>{drill.name}</Text>
-                    <Text style={styles.suggestedMeta}>{drill.category}</Text>
-                  </TouchableOpacity>
-                )
-              })}
-            </View>
-          )}
+          {suggestedDrillsBlock}
         </ScrollView>
       </SafeAreaView>
     )
   }
 
-  // Ready to practice
+  // ── Branch B: Already completed today ─────────
+
+  if (todaySession?.status === 'completed') {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.inkGhost} />}>
+          {headerBlock}
+
+          <View style={styles.centerContent}>
+            <Text style={styles.doneText}>You practiced today.</Text>
+            <Text style={styles.comeBack}>Come back tomorrow.</Text>
+
+            {continueThreadButton}
+
+            <TouchableOpacity
+              style={styles.secondaryAction}
+              onPress={handleStartSession}
+              disabled={loading}
+            >
+              <Text style={[styles.secondaryActionText, loading && { opacity: 0.5 }]}>
+                {loading ? 'Preparing...' : 'Start fresh →'}
+              </Text>
+            </TouchableOpacity>
+
+            {prepLink}
+          </View>
+
+          {suggestedDrillsBlock}
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
+  // ── Branch C/D: No session today ──────────────
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scrollContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.inkGhost} />}>
-        <View style={styles.header}>
-          <Text style={styles.logo}>CRISP</Text>
-          {streak && <Text style={styles.streakBadge}>{streak.current_streak}d</Text>}
-        </View>
+        {headerBlock}
 
         <View style={styles.centerContent}>
           <Text style={styles.greeting}>
@@ -231,11 +461,13 @@ export default function HomeScreen() {
                 onPress={() => handleFocusMode(mode)}
               >
                 <Text style={[styles.focusChipText, focusMode === mode && styles.focusChipTextActive]}>
-                  {mode === 'professional' ? 'Pro' : mode === 'relational' ? 'Personal' : 'Mixed'}
+                  {mode === 'professional' ? 'Professional' : mode === 'relational' ? 'Personal' : 'Mixed'}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
+
+          {continueThreadButton}
 
           <TouchableOpacity
             style={[styles.startButton, loading && styles.startButtonDisabled]}
@@ -243,38 +475,14 @@ export default function HomeScreen() {
             disabled={loading}
           >
             <Text style={styles.startButtonText}>
-              {loading ? 'Preparing...' : "Begin today's session"}
+              {loading ? 'Preparing...' : sessionCount === 0 ? 'Begin session' : "Begin today's session"}
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.prepButton}
-            onPress={() => router.push('/prep')}
-          >
-            <Text style={styles.prepButtonText}>Prep for something →</Text>
-          </TouchableOpacity>
+          {prepLink}
         </View>
 
-        {/* Suggested drills from last session */}
-        {suggestedDrills.length > 0 && (
-          <View style={styles.suggestedSection}>
-            <Text style={styles.suggestedTitle}>SUGGESTED WORKOUTS</Text>
-            {suggestedDrills.map(drillId => {
-              const drill = getDrillById(drillId)
-              if (!drill) return null
-              return (
-                <TouchableOpacity
-                  key={drill.id}
-                  style={styles.suggestedCard}
-                  onPress={() => router.push('/(tabs)/workouts')}
-                >
-                  <Text style={styles.suggestedName}>{drill.name}</Text>
-                  <Text style={styles.suggestedMeta}>{drill.category}</Text>
-                </TouchableOpacity>
-              )
-            })}
-          </View>
-        )}
+        {suggestedDrillsBlock}
       </ScrollView>
     </SafeAreaView>
   )
@@ -301,11 +509,17 @@ const styles = StyleSheet.create({
   prepButton: { marginTop: 16, paddingVertical: 10, alignItems: 'center' as const },
   prepButtonText: { fontSize: 14, color: colors.inkGhost },
   doneText: { fontSize: 16, color: colors.ink, marginBottom: 12 },
-  practiceAgain: { fontSize: 14, color: colors.inkGhost, marginBottom: 32 },
-  comeBack: { fontSize: 16, color: colors.inkMuted },
+  comeBack: { fontSize: 16, color: colors.inkMuted, marginTop: 4, marginBottom: 24 },
+  secondaryAction: { marginTop: 12, paddingVertical: 10, alignItems: 'center' as const },
+  secondaryActionText: { fontSize: 14, color: colors.inkMuted },
+  continueSection: { marginBottom: 16, alignItems: 'center' as const },
+  continueButton: { backgroundColor: colors.paperDim, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' as const },
+  continueButtonText: { color: colors.ink, fontSize: 15, fontWeight: '500' as const },
+  continueSummary: { fontSize: 13, color: colors.inkGhost, marginTop: 8, fontStyle: 'italic' as const, textAlign: 'center' as const, paddingHorizontal: 16 },
   suggestedSection: { marginTop: 40 },
   suggestedTitle: { fontSize: 11, fontWeight: '600', letterSpacing: 0.5, color: colors.inkGhost, marginBottom: 12 },
   suggestedCard: { backgroundColor: colors.paperDim, padding: 16, borderRadius: 12, marginBottom: 8 },
   suggestedName: { fontSize: 15, fontWeight: '500', color: colors.ink },
+  suggestedRationale: { fontSize: 13, color: colors.gold, marginTop: 2, fontStyle: 'italic' as const },
   suggestedMeta: { fontSize: 13, color: colors.inkMuted, marginTop: 4 },
 })

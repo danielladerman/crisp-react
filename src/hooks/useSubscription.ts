@@ -17,6 +17,7 @@ const REVENUECAT_API_KEY_ANDROID = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_AN
 const ENTITLEMENT_ID = 'pro'
 
 let initialized = false
+let configuring = false
 
 export function useSubscription(userId?: string) {
   const [isSubscribed, setIsSubscribed] = useState(false)
@@ -37,22 +38,34 @@ export function useSubscription(userId?: string) {
         return
       }
 
+      // Prevent concurrent configure attempts from multiple effect runs
+      if (configuring) return
+      configuring = true
+
       try {
         const apiKey = Platform.OS === 'ios' ? REVENUECAT_API_KEY_IOS : REVENUECAT_API_KEY_ANDROID
         if (!apiKey) {
           // No RevenueCat key configured — treat as subscribed (dev mode)
           setIsSubscribed(true)
           setLoading(false)
+          configuring = false
           return
         }
 
         Purchases.configure({ apiKey, appUserID: userId })
         initialized = true
+        configuring = false
 
         await checkSubscription()
       } catch (err) {
-        console.error('RevenueCat init failed:', err)
-        // Fail open in dev
+        configuring = false
+        // Expected in Expo Go — native module bridge exists but isn't functional
+        if (__DEV__) {
+          console.warn('RevenueCat init skipped (expected in Expo Go):', (err as Error).message)
+        } else {
+          console.error('RevenueCat init failed:', err)
+        }
+        // Fail open
         setIsSubscribed(true)
         setLoading(false)
       }
@@ -81,7 +94,8 @@ export function useSubscription(userId?: string) {
         setPackages(offerings.current.availablePackages)
       }
     } catch (err) {
-      console.error('Failed to load offerings:', err)
+      if (__DEV__) console.warn('Failed to load offerings:', (err as Error).message)
+      else console.error('Failed to load offerings:', err)
     }
   }, [])
 

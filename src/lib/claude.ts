@@ -12,10 +12,10 @@ async function getJwt() {
 
 const REQUEST_TIMEOUT_MS = 45_000 // 45 second timeout for API calls
 
-async function proxyFetch(body: Record<string, unknown>, retried = false): Promise<Response> {
+async function proxyFetch(body: Record<string, unknown>, retried = false, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const token = await getJwt()
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   let response: Response
   try {
@@ -38,7 +38,7 @@ async function proxyFetch(body: Record<string, unknown>, retried = false): Promi
 
   if (response.status === 401 && !retried) {
     await supabase.auth.refreshSession()
-    return proxyFetch(body, true)
+    return proxyFetch(body, true, timeoutMs)
   }
 
   return response
@@ -109,10 +109,11 @@ interface CallOptions {
   messages: Array<{ role: string; content: string }>
   model?: string
   maxTokens?: number
+  timeoutMs?: number
 }
 
-export async function callClaude({ systemPrompt, messages, model = 'claude-sonnet-4-6', maxTokens = 2000 }: CallOptions) {
-  const response = await proxyFetch({ systemPrompt, messages, model, maxTokens, stream: false })
+export async function callClaude({ systemPrompt, messages, model = 'claude-sonnet-4-6', maxTokens = 2000, timeoutMs }: CallOptions) {
+  const response = await proxyFetch({ systemPrompt, messages, model, maxTokens, stream: false }, false, timeoutMs)
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }))

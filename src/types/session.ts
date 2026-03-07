@@ -1,6 +1,6 @@
 // src/types/session.ts — Rebuilt for simplified session flow
 
-export type SessionPhase = 'prompt' | 'responding' | 'feedback' | 'done'
+export type SessionPhase = 'prompt' | 'responding' | 'feedback' | 'marking' | 'done'
 
 export interface Interaction {
   id: string

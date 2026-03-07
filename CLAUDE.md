@@ -53,9 +53,7 @@ crispreact/
 │   │   ├── useSession.ts            # Session state machine (prompt → responding → feedback → done)
 │   │   ├── usePatterns.ts           # Pattern fetch + strengths/weaknesses split
 │   │   ├── useStreak.ts             # Streak tracking
-│   │   ├── useSubscription.ts       # RevenueCat wrapper (dynamic require, fail-open)
-│   │   ├── useTranscription.ts      # Audio → text via /api/transcribe
-│   │   └── useVoiceRecorder.ts      # expo-av recording controls
+│   │   └── useSubscription.ts       # RevenueCat wrapper (dynamic require, fail-open)
 │   ├── lib/
 │   │   ├── supabase.ts              # Client init (AsyncStorage for session persistence)
 │   │   ├── claude.ts                # API proxy: streamClaude, callClaude, callClaudeWithCallbacks
@@ -485,7 +483,7 @@ npm install
 npx expo start
 ```
 
-Dependencies: Expo 55, React 19, React Native 0.83.2, Supabase JS 2.98, expo-router 55, expo-av 16, react-native-purchases 9.10, react-native-safe-area-context 5.6, react-native-screens 4.23
+Dependencies: Expo 55, React 19, React Native 0.83.2, Supabase JS 2.98, expo-router 55, react-native-purchases 9.10, react-native-safe-area-context 5.6, react-native-screens 4.23
 
 ---
 

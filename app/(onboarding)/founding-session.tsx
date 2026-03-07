@@ -32,7 +32,7 @@ export default function FoundingSessionScreen() {
 
   const {
     phase, session, interactions, feedbackText, feedbackLoading, error,
-    startSession, submitResponse, diveDeeper, tryAgain, completeSession,
+    startSession, submitResponse, tryAgain, completeSession,
   } = useSession({
     userId: user?.id || '',
     sessionCount: 0,
@@ -53,19 +53,16 @@ export default function FoundingSessionScreen() {
     setInputText('')
   }, [inputText, submitResponse])
 
-  const handleDiveDeeper = useCallback(() => {
-    if (!inputText.trim()) return
-    diveDeeper(inputText.trim())
-    setInputText('')
-  }, [inputText, diveDeeper])
-
   const handleDone = useCallback(async () => {
-    try { await updateStreak(user?.id) } catch (err) { if (__DEV__) console.error('Streak update failed:', err) }
+    const userId = user?.id
+    if (!userId) return
+
+    try { await updateStreak(userId) } catch (err) { if (__DEV__) console.error('Streak update failed:', err) }
 
     // Seed voice model from intake answers
     try {
       const intakeFields = intakeAnswers ? mapAnswersToVoiceModel(intakeAnswers) : {}
-      const currentModel = { ...intakeFields, ...(await getVoiceModel(user?.id) || {}) }
+      const currentModel = { ...intakeFields, ...(await getVoiceModel(userId) || {}) }
       const lastInteraction = interactions.filter(i => i.role === 'user').pop()
       const result = await callClaude({
         model: 'claude-sonnet-4-6',
@@ -78,7 +75,7 @@ export default function FoundingSessionScreen() {
       })
       const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
       const updatedModel = JSON.parse(cleaned)
-      await upsertVoiceModel(user?.id, updatedModel, 1)
+      await upsertVoiceModel(userId, updatedModel, 1)
     } catch (err) {
       if (__DEV__) console.error('Voice model update:', err)
     }
@@ -129,17 +126,6 @@ export default function FoundingSessionScreen() {
                 textAlignVertical="top"
               />
               <View style={styles.buttonRow}>
-                {interactions.length > 0 && (
-                  <TouchableOpacity
-                    style={styles.secondaryButton}
-                    onPress={handleDiveDeeper}
-                    disabled={!inputText.trim()}
-                  >
-                    <Text style={[styles.secondaryButtonText, !inputText.trim() && { opacity: 0.4 }]}>
-                      Dive Deeper
-                    </Text>
-                  </TouchableOpacity>
-                )}
                 <TouchableOpacity
                   style={[styles.button, !inputText.trim() && styles.buttonDisabled]}
                   onPress={handleSubmit}
@@ -177,7 +163,7 @@ export default function FoundingSessionScreen() {
         {!feedbackLoading && (
           <View style={styles.actions}>
             <TouchableOpacity style={styles.secondaryButton} onPress={tryAgain}>
-              <Text style={styles.secondaryButtonText}>Try Again</Text>
+              <Text style={styles.secondaryButtonText}>Refine my response</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.button} onPress={handleDone}>
               <Text style={styles.buttonText}>Done</Text>

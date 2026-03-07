@@ -232,7 +232,7 @@ export async function upsertVoiceModel(userId: string, model: Record<string, unk
       updated_at: new Date().toISOString(),
       session_count: sessionCount,
       model_data: model,
-    })
+    }, { onConflict: 'user_id' })
 
   if (error) throw error
 }
@@ -382,7 +382,7 @@ export async function updateStreak(userId: string) {
       longest_streak: longestStreak,
       last_practice_date: today,
       freeze_count: streak.freeze_count,
-    })
+    }, { onConflict: 'user_id' })
     .select()
     .single()
 

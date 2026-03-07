@@ -1,9 +1,10 @@
 // app/(tabs)/patterns.tsx — Patterns screen (rebuilt to use patterns table)
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useFocusEffect } from 'expo-router'
 import { useAuth } from '../../src/hooks/useAuth'
 import { usePatterns } from '../../src/hooks/usePatterns'
 import { getSessionCount } from '../../src/lib/storage'
@@ -15,17 +16,33 @@ function formatDate(dateStr: string): string {
 
 export default function PatternsScreen() {
   const { user } = useAuth()
-  const { strengths, weaknesses, loading: patternsLoading } = usePatterns(user?.id)
+  const { strengths, weaknesses, loading: patternsLoading, refresh } = usePatterns(user?.id)
   const [sessionCount, setSessionCount] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!user?.id) return
+    if (__DEV__) console.log('[PatternsScreen] Loading for userId:', user.id)
     getSessionCount(user.id)
-      .then(setSessionCount)
-      .catch(err => { if (__DEV__) console.error(err) })
+      .then((count) => {
+        if (__DEV__) console.log('[PatternsScreen] sessionCount:', count)
+        setSessionCount(count)
+      })
+      .catch(err => { if (__DEV__) console.error('[PatternsScreen] sessionCount error:', err) })
       .finally(() => setLoading(false))
   }, [user?.id])
+
+  // Refetch patterns when tab is focused (not just on mount)
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return
+      if (__DEV__) console.log('[PatternsScreen] Tab focused — refreshing patterns')
+      refresh()
+      getSessionCount(user.id)
+        .then(setSessionCount)
+        .catch(err => { if (__DEV__) console.error('[PatternsScreen] refresh sessionCount error:', err) })
+    }, [user?.id, refresh])
+  )
 
   if (loading || patternsLoading) {
     return (

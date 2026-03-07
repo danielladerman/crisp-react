@@ -6,6 +6,7 @@ import type { SessionPhase, Session, Interaction, Pattern } from '../types/sessi
 import {
   createSession, updateSession, addInteraction,
   getRecentInteractions, upsertPattern, getVoiceModel, upsertVoiceModel,
+  addToLibrary, getPatterns,
 } from '../lib/storage'
 import { callClaudeWithCallbacks, callClaude } from '../lib/claude'
 import {
@@ -14,6 +15,8 @@ import {
 } from '../lib/prompts'
 import { DRILLS } from '../lib/drills'
 import { saveCheckpoint, clearCheckpoint, SESSION_KEY } from '../lib/sessionCheckpoint'
+
+const BACKGROUND_TASK_TIMEOUT_MS = 90_000 // 90 seconds for background AI calls
 
 interface SessionConfig {
   userId: string
@@ -30,6 +33,7 @@ export function useSession(config: SessionConfig) {
   const [feedbackText, setFeedbackText] = useState('')
   const [feedbackLoading, setFeedbackLoading] = useState(false)
   const [suggestedDrills, setSuggestedDrills] = useState<string[] | null>(null)
+  const [markedText, setMarkedText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const configRef = useRef(config)
   configRef.current = config
@@ -38,8 +42,10 @@ export function useSession(config: SessionConfig) {
 
   const startSession = useCallback(async (promptType: string, promptText: string, responseMode: 'text' | 'voice' = 'text') => {
     try {
+      const userId = configRef.current.userId
+      if (!userId) throw new Error('No authenticated user')
       const newSession = await createSession({
-        userId: config.userId,
+        userId,
         promptType,
         promptText,
         responseMode,
@@ -63,7 +69,7 @@ export function useSession(config: SessionConfig) {
       setError(err instanceof Error ? err.message : 'Failed to start session')
       throw err
     }
-  }, [config.userId])
+  }, [])
 
   // ── Build messages array from interactions ───
 
@@ -103,9 +109,10 @@ export function useSession(config: SessionConfig) {
 
     try {
       // Save user interaction
+      const userId = configRef.current.userId
       const userInteraction = await addInteraction({
         sessionId: session.id,
-        userId: config.userId,
+        userId,
         role: 'user',
         content: text,
         interactionType: 'response',
@@ -127,7 +134,7 @@ export function useSession(config: SessionConfig) {
           // Save AI feedback interaction
           const aiInteraction = await addInteraction({
             sessionId: session.id,
-            userId: config.userId,
+            userId,
             role: 'assistant',
             content: fullText,
             interactionType: 'feedback',
@@ -162,7 +169,7 @@ export function useSession(config: SessionConfig) {
       setFeedbackLoading(false)
       setError(err instanceof Error ? err.message : 'Failed to submit response')
     }
-  }, [session, interactions, config.userId])
+  }, [session, interactions])
 
   // ── Dive Deeper (stay in responding phase) ───
 
@@ -172,9 +179,10 @@ export function useSession(config: SessionConfig) {
 
     try {
       // Save user's dive-deeper message
+      const userId = configRef.current.userId
       const userInteraction = await addInteraction({
         sessionId: session.id,
-        userId: config.userId,
+        userId,
         role: 'user',
         content: text,
         interactionType: 'dive_deeper',
@@ -184,17 +192,26 @@ export function useSession(config: SessionConfig) {
       setInteractions(updatedInteractions)
       setFeedbackLoading(true)
 
-      // Get AI follow-up (conversational, not formal coaching)
+      // Get AI follow-up with voice model + patterns context
       const messages = buildMessages(updatedInteractions)
+      const cfg = configRef.current
+      let deeperPrompt = DIVE_DEEPER_PROMPT
+      if (cfg.voiceModel) {
+        deeperPrompt += `\n\nVOICE MODEL:\n${JSON.stringify(cfg.voiceModel, null, 2)}`
+      }
+      if (cfg.patterns && cfg.patterns.length > 0) {
+        const patternSummary = cfg.patterns.map(p => `${p.pattern_type}: ${p.pattern_id} — ${p.description}`).join('\n')
+        deeperPrompt += `\n\nKNOWN PATTERNS:\n${patternSummary}`
+      }
 
       await callClaudeWithCallbacks({
-        systemPrompt: DIVE_DEEPER_PROMPT,
+        systemPrompt: deeperPrompt,
         messages,
         onChunk: () => {},
         onDone: async (fullText) => {
           const aiInteraction = await addInteraction({
             sessionId: session.id,
-            userId: config.userId,
+            userId,
             role: 'assistant',
             content: fullText,
             interactionType: 'follow_up',
@@ -214,7 +231,7 @@ export function useSession(config: SessionConfig) {
       setFeedbackLoading(false)
       setError(err instanceof Error ? err.message : 'Failed to dive deeper')
     }
-  }, [session, interactions, config.userId])
+  }, [session, interactions])
 
   // ── Try Again (back to responding) ───────────
 
@@ -222,6 +239,47 @@ export function useSession(config: SessionConfig) {
     setPhase('responding')
     setFeedbackText('')
     setError(null)
+  }, [])
+
+  // ── Mark Moments (save multiple chunks to library, transition to done) ──
+
+  const markMoments = useCallback(async (texts: string[]) => {
+    if (__DEV__) console.log('[markMoments] called with', texts.length, 'texts, session:', session?.id, 'userId:', configRef.current.userId)
+    if (!session) {
+      if (__DEV__) console.warn('[markMoments] No session — aborting')
+      return
+    }
+    const userId = configRef.current.userId
+    if (!userId) {
+      if (__DEV__) console.warn('[markMoments] No userId — aborting')
+      return
+    }
+    const validTexts = texts.filter(t => t.trim())
+    if (__DEV__) console.log('[markMoments] validTexts:', validTexts.length)
+    if (validTexts.length > 0) {
+      setMarkedText(validTexts.join(' | '))
+      for (const text of validTexts) {
+        try {
+          if (__DEV__) console.log('[markMoments] Saving to library:', text.substring(0, 50) + '...')
+          await addToLibrary({
+            userId,
+            sessionId: session.id,
+            markedText: text.trim(),
+            promptText: session.prompt_text,
+            aiObservation: '',
+            promptType: session.prompt_type,
+            source: 'session',
+          })
+          if (__DEV__) console.log('[markMoments] Saved successfully')
+        } catch (err) {
+          if (__DEV__) console.error('[markMoments] Failed to save marked moment:', err)
+        }
+      }
+    }
+  }, [session])
+
+  const skipMarking = useCallback(() => {
+    setPhase('done')
   }, [])
 
   // ── Complete Session ─────────────────────────
@@ -243,19 +301,33 @@ export function useSession(config: SessionConfig) {
 
   async function runPostSessionTasks(sess: Session, ints: Interaction[], feedback: string) {
     const cfg = configRef.current
+    if (__DEV__) console.log('[runPostSessionTasks] userId:', cfg.userId, '| session:', sess.id)
+    if (!cfg.userId) {
+      if (__DEV__) console.warn('[runPostSessionTasks] No userId — skipping all background tasks')
+      return
+    }
 
     // 1. Pattern analysis
     try {
-      const recentInts = await getRecentInteractions(cfg.userId, 100)
+      const [recentInts, existingPatterns] = await Promise.all([
+        getRecentInteractions(cfg.userId, 100),
+        getPatterns(cfg.userId),
+      ])
       const context = recentInts
         .filter(i => i.role === 'user')
         .map(i => i.content)
         .join('\n---\n')
 
+      // Include existing patterns so Claude can reference them instead of creating duplicates
+      const existingList = existingPatterns.length > 0
+        ? `\n\nALREADY DETECTED PATTERNS (reuse these pattern_ids if the same pattern is observed, do not create duplicates):\n${existingPatterns.map(p => `- ${p.pattern_type}: ${p.pattern_id} — ${p.description}`).join('\n')}`
+        : ''
+
       const result = await callClaude({
         systemPrompt: PATTERN_ANALYSIS_PROMPT,
-        messages: [{ role: 'user', content: `Recent user responses across sessions:\n\n${context}` }],
+        messages: [{ role: 'user', content: `Recent user responses across sessions:\n\n${context}${existingList}` }],
         maxTokens: 1000,
+        timeoutMs: BACKGROUND_TASK_TIMEOUT_MS,
       })
 
       const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
@@ -270,20 +342,32 @@ export function useSession(config: SessionConfig) {
       if (__DEV__) console.error('Pattern analysis failed:', err)
     }
 
-    // 2. Voice model update
+    // 2. Voice model update (trimmed context to reduce timeout risk)
     try {
-      const currentModel = await getVoiceModel(cfg.userId) || {}
+      const fullModel: any = await getVoiceModel(cfg.userId) || {}
+      // Send only the fields Claude needs to update, not the entire model
+      const trimmedModel = {
+        voicePatterns: fullModel.voicePatterns,
+        recentBreakthroughs: fullModel.recentBreakthroughs,
+        pendingProbes: fullModel.pendingProbes,
+        sessionCount: fullModel.sessionCount,
+        growthEdge: fullModel.growthEdge,
+        detectedWeaknesses: fullModel.detectedWeaknesses,
+      }
       const result = await callClaude({
         systemPrompt: VOICE_MODEL_UPDATE_PROMPT,
         messages: [{
           role: 'user',
-          content: `CURRENT VOICE MODEL:\n${JSON.stringify(currentModel, null, 2)}\n\nSESSION DATA:\nPrompt: ${sess.prompt_text}\nSession Number: ${cfg.sessionCount + 1}\n\nINTERACTIONS:\n${ints.map(i => `[${i.role}] ${i.content}`).join('\n\n')}\n\nUpdate the voice model. Return only updated JSON.`,
+          content: `CURRENT VOICE MODEL:\n${JSON.stringify(trimmedModel, null, 2)}\n\nSESSION DATA:\nPrompt: ${sess.prompt_text}\nSession Number: ${cfg.sessionCount + 1}\n\nINTERACTIONS:\n${ints.map(i => `[${i.role}] ${i.content}`).join('\n\n')}\n\nUpdate the voice model. Return only updated JSON.`,
         }],
         maxTokens: 3000,
+        timeoutMs: BACKGROUND_TASK_TIMEOUT_MS,
       })
 
       const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
       const updatedModel = JSON.parse(cleaned)
+      if (__DEV__) console.log('[runPostSessionTasks] upsertVoiceModel userId:', cfg.userId)
+      if (!cfg.userId) { console.warn('[runPostSessionTasks] Skipping voice model upsert — no userId'); return }
       await upsertVoiceModel(cfg.userId, updatedModel, cfg.sessionCount + 1)
     } catch (err) {
       if (__DEV__) console.error('Voice model update failed:', err)
@@ -303,6 +387,7 @@ export function useSession(config: SessionConfig) {
         systemPrompt: prompt,
         messages: [{ role: 'user', content: 'Suggest drills based on the above context.' }],
         maxTokens: 500,
+        timeoutMs: BACKGROUND_TASK_TIMEOUT_MS,
       })
 
       const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
@@ -324,11 +409,14 @@ export function useSession(config: SessionConfig) {
     feedbackText,
     feedbackLoading,
     suggestedDrills,
+    markedText,
     error,
     startSession,
     submitResponse,
     diveDeeper,
     tryAgain,
+    markMoments,
+    skipMarking,
     completeSession,
     // Expose for checkpoint restoration
     setPhase,
